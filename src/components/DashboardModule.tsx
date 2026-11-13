@@ -127,170 +127,162 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
 
   return (
     <div className="space-y-8 pb-6">
-      {/* Hero & Core Dashboard Stage with Centered Puma Face Backdrop */}
-      <section className="relative overflow-hidden border-b border-primary/15">
-        {/* Background Puma Face Image */}
+      {/* Hero & Core Dashboard Stage with Prominent Puma Face Backdrop */}
+      <section className="relative overflow-hidden border-b border-white/10 bg-[#040706]">
+        {/* Background Puma Face Image — higher clarity & less green tint on Portada */}
         <div className="pointer-events-none absolute inset-0 select-none overflow-hidden">
           <img
             src={pumaBackdrop}
             alt=""
             aria-hidden="true"
-            className="h-full w-full object-cover object-center opacity-55 brightness-95 contrast-105"
+            className="h-full w-full object-cover object-[center_32%] opacity-90 brightness-110 contrast-110 saturate-[0.72]"
           />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(3,15,10,0.28)_0%,rgba(3,15,10,0.78)_70%,#030F0A_100%)]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#030F0A]/75 via-transparent to-[#030F0A]" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(4,7,6,0.06)_0%,rgba(4,7,6,0.48)_72%,rgba(3,10,7,0.88)_100%)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#040807]/65 via-transparent to-[#030F0A]" />
         </div>
 
         <div className="relative z-10 mx-auto max-w-6xl space-y-6 px-4 pb-8 pt-5 sm:px-6 sm:pt-7">
-          {/* Institutional Header Row */}
-          <div className="space-y-3.5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/40 bg-[#051810]/90 p-1.5">
-                <svg viewBox="0 0 44 44" aria-hidden="true" className="h-full w-full">
-                  <path
-                    d="M6 34 L16 16 L24 26 L31 11 L38 34 Z"
-                    fill="#0D3826"
-                    stroke="#86E5B0"
-                    strokeWidth="2.2"
-                    strokeLinejoin="round"
-                  />
-                  <circle cx="31" cy="11" r="3" fill="#86E5B0" />
-                  <path
-                    d="M8 37 Q22 33 36 37"
-                    fill="none"
-                    stroke="#34D399"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
-              <div className="min-w-0">
-                <p className="font-mono text-[11px] font-semibold tracking-widest text-primary">
+          {/* Institutional Header Row + Official CBLS Logo on Portada */}
+          <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
+            <div className="min-w-0 flex-1 space-y-4">
+              <div className="space-y-1">
+                <p className="font-mono text-[11px] font-semibold tracking-widest text-[#A7E8C3]">
                   REPÚBLICA DE COSTA RICA
                 </p>
-                <p className="truncate text-xs text-foreground/90 sm:text-sm">
+                <p className="text-xs text-foreground/90 sm:text-sm">
                   Sistema de Bitácora de Campo &amp; Taxonomía |{' '}
-                  <span className="font-semibold text-primary">
+                  <span className="font-semibold text-[#B8EBD0]">
                     Corredor Biológico Los Santos
                   </span>
                 </p>
               </div>
+
+              {/* Compact Status & Session Action Badges (Never displays access codes) */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={onRequestUserSession}
+                  title="Cambiar persona o código de acceso"
+                  className="inline-flex min-h-10 items-center gap-2.5 rounded-full border border-white/15 bg-[#070D0B]/75 px-3.5 py-1.5 text-left backdrop-blur-sm transition-colors hover:border-[#A7E8C3]/50"
+                >
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-[#B8EBD0]">
+                    <UserCheck className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="leading-tight">
+                    <span className="block font-mono text-[9px] uppercase tracking-wider text-white/65">
+                      Observador activo
+                    </span>
+                    <span className="block text-xs font-semibold text-foreground">
+                      {currentUser?.observerName || 'Identificarme'}
+                      {currentUser?.isAdmin ? ' · Admin' : ''}
+                    </span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onNavigate('respaldo')}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/15 bg-[#070D0B]/75 px-3.5 py-1.5 text-xs font-medium text-foreground backdrop-blur-sm transition-colors hover:border-[#A7E8C3]/50"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`h-2 w-2 rounded-full ${
+                      effectiveOffline ? 'bg-coral' : 'bg-[#6EE7B7]'
+                    }`}
+                  />
+                  <span>
+                    {effectiveOffline
+                      ? 'Modo Offline Autónomo'
+                      : 'En vivo · Colaboración Activa'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onNavigate('respaldo')}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-full border border-white/15 bg-[#070D0B]/75 px-3.5 py-1.5 text-xs font-medium text-[#B8EBD0] backdrop-blur-sm transition-colors hover:border-[#A7E8C3]/50"
+                >
+                  {effectiveOffline ? (
+                    <WifiOff className="h-3.5 w-3.5 text-coral" />
+                  ) : (
+                    <Wifi className="h-3.5 w-3.5 text-[#A7E8C3]" />
+                  )}
+                  <span>
+                    {pendingSyncCount > 0
+                      ? `${pendingSyncCount} en cola · #${checksum.slice(0, 6)}`
+                      : `Sincronizado · #${checksum.slice(0, 6)}`}
+                  </span>
+                </button>
+
+                {pwaInstallSlot}
+              </div>
+
+              {/* Hero Title & CBLS Scope Description */}
+              <div className="max-w-2xl space-y-2 pt-1">
+                <h1 className="font-display text-4xl font-extrabold tracking-tight text-[#C7F2DA] drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)] sm:text-6xl">
+                  Bitácora CBLS
+                </h1>
+                <p className="text-sm leading-relaxed text-foreground/95 drop-shadow-[0_1px_8px_rgba(0,0,0,0.9)] sm:text-base">
+                  Plataforma de campo para el inventario biológico en el{' '}
+                  <strong className="font-semibold text-white">
+                    Corredor Biológico Los Santos
+                  </strong>
+                  .
+                  <br />
+                  Gradiente altitudinal (800 – 3 500 m s.n.m.) y monitoreo de{' '}
+                  <span className="italic text-[#B8EBD0]">Puma concolor</span>,
+                  flora y fauna en Talamanca.
+                </p>
+              </div>
             </div>
 
-            {/* Compact Status & Session Action Badges (Never displays access codes) */}
-            <div className="flex flex-wrap items-center gap-2.5">
-              <button
-                type="button"
-                onClick={onRequestUserSession}
-                title="Cambiar persona o código de acceso"
-                className="inline-flex min-h-10 items-center gap-2.5 rounded-full border border-primary/25 bg-[#05150E]/90 px-3.5 py-1.5 text-left transition-colors hover:border-primary/55"
-              >
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-primary">
-                  <UserCheck className="h-3.5 w-3.5" />
-                </span>
-                <span className="leading-tight">
-                  <span className="block font-mono text-[9px] uppercase tracking-wider text-muted">
-                    Observador activo
-                  </span>
-                  <span className="block text-xs font-semibold text-foreground">
-                    {currentUser?.observerName || 'Identificarme'}
-                    {currentUser?.isAdmin ? ' · Admin' : ''}
-                  </span>
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('respaldo')}
-                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-primary/25 bg-[#05150E]/90 px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/55"
-              >
-                <span
-                  aria-hidden="true"
-                  className={`h-2 w-2 rounded-full ${
-                    effectiveOffline ? 'bg-coral' : 'bg-secondary'
-                  }`}
+            {/* Official Corredor Biológico Los Santos Logo */}
+            <div className="shrink-0 self-start lg:self-center">
+              <div className="overflow-hidden rounded-2xl border border-white/25 bg-white/95 p-2.5 shadow-[0_12px_36px_rgba(0,0,0,0.6)] sm:p-3">
+                <img
+                  src="/assets/aistudio/WhatsApp_Image_2026-11-12_at_10.43.47_e0604207.jpeg"
+                  alt="Logotipo del Corredor Biológico Los Santos"
+                  className="h-24 w-auto object-contain sm:h-28 lg:h-32"
                 />
-                <span>
-                  {effectiveOffline
-                    ? 'Modo Offline Autónomo'
-                    : 'En vivo · Colaboración Activa'}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onNavigate('respaldo')}
-                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-primary/25 bg-[#05150E]/90 px-3.5 py-1.5 text-xs font-medium text-primary transition-colors hover:border-primary/55"
-              >
-                {effectiveOffline ? (
-                  <WifiOff className="h-3.5 w-3.5 text-coral" />
-                ) : (
-                  <Wifi className="h-3.5 w-3.5 text-primary" />
-                )}
-                <span>
-                  {pendingSyncCount > 0
-                    ? `${pendingSyncCount} en cola · #${checksum.slice(0, 6)}`
-                    : `Sincronizado · #${checksum.slice(0, 6)}`}
-                </span>
-              </button>
-
-              {pwaInstallSlot}
+              </div>
             </div>
           </div>
 
-          {/* Hero Title & CBLS Scope Description */}
-          <div className="max-w-2xl space-y-2 pt-1">
-            <h1 className="font-display text-4xl font-extrabold tracking-tight text-primary sm:text-6xl">
-              Bitácora CBLS
-            </h1>
-            <p className="text-sm leading-relaxed text-foreground/90 sm:text-base">
-              Plataforma de campo para el inventario biológico en el{' '}
-              <strong className="font-semibold text-foreground">
-                Corredor Biológico Los Santos
-              </strong>
-              .
-              <br />
-              Gradiente altitudinal (800 – 3 500 m s.n.m.) y monitoreo de{' '}
-              <span className="italic text-primary">Puma concolor</span>, flora
-              y fauna en Talamanca.
-            </p>
-          </div>
-
-          {/* Unified 3-Column Dark Stat Strip matching Reference Screenshot */}
-          <div className="grid grid-cols-1 divide-y divide-primary/15 overflow-hidden rounded-xl border border-primary/20 bg-[#030D08]/88 backdrop-blur-sm sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          {/* Unified 3-Column Translucent Stat Strip so Puma Face stays visible */}
+          <div className="grid grid-cols-1 divide-y divide-white/12 overflow-hidden rounded-xl border border-white/15 bg-[#050A08]/58 backdrop-blur-[2px] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <div className="flex flex-col items-center justify-center px-4 py-6 text-center">
-              <span className="font-mono text-[11px] font-medium uppercase tracking-widest text-muted">
+              <span className="font-mono text-[11px] font-medium uppercase tracking-widest text-white/75">
                 Especies
               </span>
-              <span className="mt-2 font-display text-4xl font-bold tabular-nums text-foreground sm:text-[2.75rem]">
+              <span className="mt-2 font-display text-4xl font-bold tabular-nums text-white drop-shadow sm:text-[2.75rem]">
                 {species.length}
               </span>
-              <span className="mt-1.5 text-[11px] text-muted">
+              <span className="mt-1.5 text-[11px] text-white/75">
                 {faunaCount} fauna · {floraCount} flora ·{' '}
                 <span className="text-coral">{threatenedCount} UICN</span>
               </span>
             </div>
 
             <div className="flex flex-col items-center justify-center px-4 py-6 text-center">
-              <span className="font-mono text-[11px] font-medium uppercase tracking-widest text-primary">
+              <span className="font-mono text-[11px] font-medium uppercase tracking-widest text-[#B8EBD0]">
                 Avistamientos
               </span>
-              <span className="mt-2 font-display text-4xl font-bold tabular-nums text-foreground sm:text-[2.75rem]">
+              <span className="mt-2 font-display text-4xl font-bold tabular-nums text-white drop-shadow sm:text-[2.75rem]">
                 {sightings.length}
               </span>
-              <span className="mt-1.5 text-[11px] text-muted">
+              <span className="mt-1.5 text-[11px] text-white/75">
                 IndexedDB autónomo · {HOLDRIDGE_ZONES.length} zonas Holdridge
               </span>
             </div>
 
             <div className="flex flex-col items-center justify-center px-4 py-6 text-center">
-              <span className="font-mono text-[11px] font-medium uppercase tracking-widest text-muted">
+              <span className="font-mono text-[11px] font-medium uppercase tracking-widest text-white/75">
                 Individuos
               </span>
-              <span className="mt-2 font-display text-4xl font-bold tabular-nums text-foreground sm:text-[2.75rem]">
+              <span className="mt-2 font-display text-4xl font-bold tabular-nums text-white drop-shadow sm:text-[2.75rem]">
                 {totalIndividuals}
               </span>
-              <span className="mt-1.5 text-[11px] text-muted">
+              <span className="mt-1.5 text-[11px] text-white/75">
                 especímenes contabilizados en sitio
               </span>
             </div>
@@ -298,9 +290,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
 
           {/* Horizontal Featured Species Card (or Empty State from 0) */}
           {featuredSpecies ? (
-            <div className="flex flex-col justify-between gap-4 rounded-xl border border-primary/20 bg-[#030D08]/90 px-5 py-4 backdrop-blur-sm md:flex-row md:items-center">
+            <div className="flex flex-col justify-between gap-4 rounded-xl border border-white/15 bg-[#050A08]/68 px-5 py-4 backdrop-blur-sm md:flex-row md:items-center">
               <div className="flex min-w-0 items-center gap-4">
-                <div className="h-14 w-20 shrink-0 overflow-hidden rounded-lg border border-primary/30 bg-[#071912]">
+                <div className="h-14 w-20 shrink-0 overflow-hidden rounded-lg border border-white/20 bg-[#0A1410]">
                   <SpecimenImage
                     src={featuredSpecies.photoUrl}
                     alt={`${featuredSpecies.commonName} (${featuredSpecies.scientificName})`}
@@ -309,26 +301,26 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                   />
                 </div>
                 <div className="min-w-0 space-y-2">
-                  <p className="truncate text-base font-bold text-foreground sm:text-lg">
-                    <span className="italic text-primary">
+                  <p className="truncate text-base font-bold text-white sm:text-lg">
+                    <span className="italic text-[#B8EBD0]">
                       {featuredSpecies.scientificName}
                     </span>{' '}
-                    <span className="text-muted/60">|</span>{' '}
+                    <span className="text-white/40">|</span>{' '}
                     <span>{featuredSpecies.commonName}</span>
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => onOpenSpeciesDetail(featuredSpecies.id)}
-                      className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-primary/35 bg-[#103D2A] px-3.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-[#16533A]"
+                      className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#A7E8C3]/30 bg-[#123326]/90 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#194735]"
                     >
-                      <ArrowUpRight className="h-3.5 w-3.5 text-primary" />
+                      <ArrowUpRight className="h-3.5 w-3.5 text-[#B8EBD0]" />
                       Abrir Ficha Científica
                     </button>
                     <button
                       type="button"
                       onClick={() => onQuickSighting(featuredSpecies.id)}
-                      className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border bg-[#071912] px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:border-primary/45"
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-[#09120F]/90 px-3 py-1.5 text-xs font-medium text-[#B8EBD0] transition-colors hover:border-[#A7E8C3]/45"
                     >
                       <Plus className="h-3.5 w-3.5" />
                       Avistamiento
@@ -338,7 +330,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                       <button
                         type="button"
                         onClick={() => handleToggleAudio(featuredSpecies)}
-                        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border bg-[#071912] px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/45"
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-[#09120F]/90 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:border-[#A7E8C3]/45"
                       >
                         {playingId === featuredSpecies.id ? (
                           <>
@@ -347,7 +339,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                           </>
                         ) : (
                           <>
-                            <Volume2 className="h-3.5 w-3.5 text-primary" />
+                            <Volume2 className="h-3.5 w-3.5 text-[#B8EBD0]" />
                             Canto
                           </>
                         )}
@@ -358,60 +350,60 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
               </div>
 
               <div className="flex shrink-0 items-center justify-between gap-3 md:flex-col md:items-end">
-                <span className="rounded-full border border-border bg-[#071A12] px-3.5 py-1.5 font-mono text-xs text-muted">
+                <span className="rounded-full border border-white/15 bg-[#08120F]/90 px-3.5 py-1.5 font-mono text-xs text-white/80">
                   CAT. {featuredSpecies.catalogCode}
                 </span>
-                <span className="font-mono text-[11px] text-muted">
+                <span className="font-mono text-[11px] text-white/65">
                   UICN {featuredSpecies.iucn} · {featuredSpecies.elevationM} m
                 </span>
               </div>
             </div>
           ) : (
-            <div className="flex flex-col justify-between gap-4 rounded-xl border border-primary/20 bg-[#030D08]/90 px-5 py-4 backdrop-blur-sm md:flex-row md:items-center">
+            <div className="flex flex-col justify-between gap-4 rounded-xl border border-white/15 bg-[#050A08]/68 px-5 py-4 backdrop-blur-sm md:flex-row md:items-center">
               <div className="flex min-w-0 items-center gap-4">
-                <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-[#082418] text-primary">
+                <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-[#0C1D16] text-[#B8EBD0]">
                   <FilePlus2 className="h-6 w-6" />
                 </div>
                 <div className="min-w-0 space-y-2">
-                  <p className="text-base font-bold text-foreground sm:text-lg">
-                    <span className="italic text-primary">
+                  <p className="text-base font-bold text-white sm:text-lg">
+                    <span className="italic text-[#B8EBD0]">
                       Inventario desde 0
                     </span>{' '}
-                    <span className="text-muted/60">|</span>{' '}
+                    <span className="text-white/40">|</span>{' '}
                     <span>Comienza tu catálogo de campo</span>
                   </p>
                   <button
                     type="button"
                     onClick={onOpenNewSpecies}
-                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-primary/35 bg-[#103D2A] px-3.5 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-[#16533A]"
+                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#A7E8C3]/30 bg-[#123326]/90 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#194735]"
                   >
-                    <FilePlus2 className="h-3.5 w-3.5 text-primary" />
+                    <FilePlus2 className="h-3.5 w-3.5 text-[#B8EBD0]" />
                     Agregar Primera Especie (URL y Ficha)
                   </button>
                 </div>
               </div>
 
-              <span className="self-start rounded-full border border-border bg-[#071A12] px-3.5 py-1.5 font-mono text-xs text-muted md:self-center">
+              <span className="self-start rounded-full border border-white/15 bg-[#08120F]/90 px-3.5 py-1.5 font-mono text-xs text-white/75 md:self-center">
                 CAT. CBLS-0000
               </span>
             </div>
           )}
 
-          {/* 4-Card Quick Action Grid matching Reference Screenshot */}
+          {/* 4-Card Quick Action Grid — softened green tint so puma shows through */}
           <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
             <button
               type="button"
               onClick={() => onNavigate('mapa')}
-              className="flex items-center gap-3.5 rounded-xl border border-primary/18 bg-[#05140D]/90 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-primary/45"
+              className="flex items-center gap-3.5 rounded-xl border border-white/15 bg-[#060C0A]/72 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-white/35"
             >
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-[#0A2016] text-muted">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-[#0E1814] text-white/80">
                 <Compass className="h-5 w-5" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-bold text-foreground">
+                <span className="block text-sm font-bold text-white">
                   Mapa SIG
                 </span>
-                <span className="block truncate text-xs text-muted">
+                <span className="block truncate text-xs text-white/70">
                   Satélite, calles y GPS exacto
                 </span>
               </span>
@@ -420,16 +412,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
             <button
               type="button"
               onClick={onOpenNewSpecies}
-              className="flex items-center gap-3.5 rounded-xl border border-primary/30 bg-[#082A1C]/90 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-[#0B3524]"
+              className="flex items-center gap-3.5 rounded-xl border border-[#A7E8C3]/25 bg-[#0A2017]/74 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-[#A7E8C3]/50 hover:bg-[#0E2B1F]/85"
             >
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-[#0E3F2B] text-primary">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#A7E8C3]/25 bg-[#123326] text-[#B8EBD0]">
                 <FilePlus2 className="h-5 w-5" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-bold text-foreground">
+                <span className="block text-sm font-bold text-white">
                   + Agregar Especie
                 </span>
-                <span className="block truncate text-xs text-muted">
+                <span className="block truncate text-xs text-white/70">
                   Nueva ficha en lista
                 </span>
               </span>
@@ -438,16 +430,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
             <button
               type="button"
               onClick={() => onNavigate('coleccion')}
-              className="flex items-center gap-3.5 rounded-xl border border-primary/18 bg-[#05140D]/90 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-primary/45"
+              className="flex items-center gap-3.5 rounded-xl border border-white/15 bg-[#060C0A]/72 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-white/35"
             >
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-[#0A2016] text-muted">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-[#0E1814] text-white/80">
                 <LayoutGrid className="h-5 w-5" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-bold text-foreground">
+                <span className="block text-sm font-bold text-white">
                   Colección
                 </span>
-                <span className="block truncate text-xs text-muted">
+                <span className="block truncate text-xs text-white/70">
                   {species.length} especies catalogadas
                 </span>
               </span>
@@ -456,16 +448,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
             <button
               type="button"
               onClick={() => onNavigate('estadistica')}
-              className="flex items-center gap-3.5 rounded-xl border border-primary/30 bg-[#082A1C]/90 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-primary/60 hover:bg-[#0B3524]"
+              className="flex items-center gap-3.5 rounded-xl border border-[#A7E8C3]/25 bg-[#0A2017]/74 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-[#A7E8C3]/50 hover:bg-[#0E2B1F]/85"
             >
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-[#0E3F2B] text-primary">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#A7E8C3]/25 bg-[#123326] text-[#B8EBD0]">
                 <BarChart3 className="h-5 w-5" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-bold text-foreground">
+                <span className="block text-sm font-bold text-white">
                   Estadística
                 </span>
-                <span className="block truncate text-xs text-muted">
+                <span className="block truncate text-xs text-white/70">
                   Conteos e índices Darwin Core
                 </span>
               </span>
