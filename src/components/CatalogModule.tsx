@@ -1,0 +1,1350 @@
+import React, { useEffect, useState } from 'react';
+import {
+  Compass,
+  Edit3,
+  FilePlus2,
+  Lock,
+  Plus,
+  Square,
+  Trash2,
+  Video,
+  Volume2,
+} from 'lucide-react';
+import type {
+  CurationStatus,
+  HoldridgeZoneId,
+  IucnCategory,
+  PhotoTag,
+  SightingEntry,
+  SpeciesRecord,
+  TaxonGroup,
+  UserSession,
+} from '../types/cbls';
+import {
+  detectHoldridgeZoneByElevation,
+  estimateCblsElevationFromCoords,
+  getHoldridgeZoneInfo,
+  HOLDRIDGE_ZONES,
+  playBioacousticPreview,
+  TAXON_GROUPS,
+} from '../utils/ecology';
+import { AdminPinModal } from './AdminPinModal';
+import {
+  Button,
+  Field,
+  inputClassName,
+  SpecimenImage,
+  StepperInput,
+  Surface,
+  textareaClassName,
+} from './ui';
+
+interface CatalogModuleProps {
+  species: SpeciesRecord[];
+  sightings: SightingEntry[];
+  selectedSpeciesId: string | null;
+  startInCreateMode: boolean;
+  currentUser: UserSession | null;
+  onRequestUserSession: () => void;
+  onSelectSpecies: (id: string) => void;
+  onClearCreateMode: () => void;
+  onSaveSpecies: (
+    record: SpeciesRecord,
+    initialCount?: number,
+  ) => void;
+  onDeleteSpecies: (id: string) => void;
+  onQuickSighting: (speciesId: string) => void;
+}
+
+const PHOTO_TAGS: PhotoTag[] = [
+  'Vista general',
+  'Ojo',
+  'Flanco',
+  'Dorso',
+  'Puesta',
+  'Hembra',
+  'Macho',
+  'Floración / Fruto',
+];
+
+const IUCN_OPTIONS: { code: IucnCategory; label: string }[] = [
+  { code: 'LC', label: 'LC — Preocupación menor' },
+  { code: 'NT', label: 'NT — Casi amenazada' },
+  { code: 'VU', label: 'VU — Vulnerable' },
+  { code: 'EN', label: 'EN — En peligro' },
+  { code: 'CR', label: 'CR — En peligro crítico' },
+];
+
+function createEmptySpeciesDraft(nextIndex: number, user: UserSession | null): SpeciesRecord {
+  return {
+    id: `sp-${Date.now()}`,
+    catalogCode: `CBLS-SP-${String(nextIndex).padStart(3, '0')}`,
+    scientificName: '',
+    commonName: '',
+    taxon: 'Aves',
+    iucn: 'LC',
+    medicalAlert: false,
+    curationStatus: 'Borrador local',
+    photoUrl: '',
+    videoUrl: '',
+    photoTag: 'Vista general',
+    bioacoustics: {
+      hasCall: false,
+      audioUrl: '',
+      dominantFreqKhz: 2.4,
+      pulsePattern: 'pulse',
+      notes: 'No aplica (Sin canto).',
+    },
+    latitude: 9.584,
+    longitude: -83.912,
+    elevationM: 2150,
+    locality: 'Sector Copey de Dota, CBLS',
+    holdridgeZone: 'bp-MB',
+    activityCycle: 'Diurna',
+    ecology: {
+      chromaticsAnatomy: '',
+      ethologyBehavior: '',
+      courtshipReproduction: '',
+      interIntraRelations: '',
+      confirmedReferences: '',
+    },
+    updatedAt: new Date().toISOString(),
+    synced: false,
+    creatorName: user?.observerName,
+  };
+}
+
+export const CatalogModule: React.FC<CatalogModuleProps> = ({
+  species,
+  sightings,
+  selectedSpeciesId,
+  startInCreateMode,
+  currentUser,
+  onRequestUserSession,
+  onSelectSpecies,
+  onClearCreateMode,
+  onSaveSpecies,
+  onDeleteSpecies,
+  onQuickSighting,
+}) => {
+  const activeSpecies =
+    species.find((s) => s.id === selectedSpeciesId) ?? species[0] ?? null;
+
+  const [mode, setMode] = useState<'view' | 'edit' | 'create'>(
+    startInCreateMode || species.length === 0 ? 'create' : 'view',
+  );
+  const [draft, setDraft] = useState<SpeciesRecord>(() =>
+    startInCreateMode || !activeSpecies
+      ? createEmptySpeciesDraft(species.length + 1, currentUser)
+      : activeSpecies,
+  );
+  const [initialCount, setInitialCount] = useState<number>(1);
+  const [gpsNotice, setGpsNotice] = useState<string | null>(null);
+
+  // Admin PIN Protection states
+  const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
+  const [pendingAdminAction, setPendingAdminAction] = useState<'edit' | 'delete' | null>(null);
+  const [confirmAdminDelete, setConfirmAdminDelete] = useState(false);
+
+  const [isPlayingCall, setIsPlayingCall] = useState<boolean>(false);
+  const [stopAudio, setStopAudio] = useState<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (startInCreateMode || species.length === 0) {
+      setMode('create');
+      setDraft(createEmptySpeciesDraft(species.length + 1, currentUser));
+      onClearCreateMode();
+    }
+  }, [startInCreateMode, species.length, currentUser, onClearCreateMode]);
+
+  useEffect(() => {
+    if (mode === 'view' && activeSpecies) {
+      setDraft(activeSpecies);
+      setConfirmAdminDelete(false);
+    }
+  }, [activeSpecies, mode]);
+
+  useEffect(() => {
+    return () => {
+      if (stopAudio) stopAudio();
+    };
+  }, [stopAudio]);
+
+  const speciesSightings = activeSpecies
+    ? sightings.filter((o) => o.speciesId === activeSpecies.id)
+    : [];
+  const speciesTotalIndividuals = speciesSightings.reduce(
+    (sum, s) => sum + s.individualCount,
+    0,
+  );
+
+  const handleCaptureGps = () => {
+    setGpsNotice('Consultando coordenadas WGS84...');
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = Number(pos.coords.latitude.toFixed(5));
+          const lon = Number(pos.coords.longitude.toFixed(5));
+          const alt = pos.coords.altitude
+            ? Math.round(pos.coords.altitude)
+            : estimateCblsElevationFromCoords(lat, lon);
+          const autoZone = detectHoldridgeZoneByElevation(alt);
+          setDraft((prev) => ({
+            ...prev,
+            latitude: lat,
+            longitude: lon,
+            elevationM: alt,
+            holdridgeZone: autoZone,
+          }));
+          setGpsNotice(
+            `GPS fijado: ${lat}° N, ${lon}° W · ${alt} m s.n.m. (${autoZone})`,
+          );
+        },
+        () => {
+          const lat = 9.5518;
+          const lon = -83.8062;
+          const alt = 2380;
+          const autoZone = detectHoldridgeZoneByElevation(alt);
+          setDraft((prev) => ({
+            ...prev,
+            latitude: lat,
+            longitude: lon,
+            elevationM: alt,
+            holdridgeZone: autoZone,
+          }));
+          setGpsNotice(
+            `Referencia estación CBLS aplicada: ${lat}° N, ${lon}° W · ${alt} m s.n.m.`,
+          );
+        },
+        { timeout: 3500 },
+      );
+    }
+  };
+
+  const handlePlayCall = (target: SpeciesRecord) => {
+    if (isPlayingCall && stopAudio) {
+      stopAudio();
+      setIsPlayingCall(false);
+      setStopAudio(null);
+      return;
+    }
+    if (stopAudio) stopAudio();
+    setIsPlayingCall(true);
+
+    if (target.bioacoustics.audioUrl) {
+      const audio = new Audio(target.bioacoustics.audioUrl);
+      audio.play().catch(() => {
+        const stop = playBioacousticPreview(
+          target.bioacoustics.pulsePattern ?? 'flute',
+          target.bioacoustics.dominantFreqKhz ?? 2.4,
+          () => {
+            setIsPlayingCall(false);
+            setStopAudio(null);
+          },
+        );
+        setStopAudio(() => stop);
+      });
+      const stop = () => {
+        audio.pause();
+        audio.currentTime = 0;
+      };
+      setStopAudio(() => stop);
+      audio.onended = () => {
+        setIsPlayingCall(false);
+        setStopAudio(null);
+      };
+      return;
+    }
+
+    const stop = playBioacousticPreview(
+      target.bioacoustics.pulsePattern ?? 'flute',
+      target.bioacoustics.dominantFreqKhz ?? 2.4,
+      () => {
+        setIsPlayingCall(false);
+        setStopAudio(null);
+      },
+    );
+    setStopAudio(() => stop);
+  };
+
+  // Protected edit request (direct for admin session, PIN modal otherwise)
+  const requestEditSpecies = () => {
+    if (currentUser?.isAdmin && activeSpecies) {
+      setDraft(activeSpecies);
+      setMode('edit');
+      return;
+    }
+    setPendingAdminAction('edit');
+    setAdminPinModalOpen(true);
+  };
+
+  // Protected delete request (inline confirm for admin session, PIN modal otherwise)
+  const requestDeleteSpecies = () => {
+    if (currentUser?.isAdmin) {
+      setConfirmAdminDelete(true);
+      return;
+    }
+    setPendingAdminAction('delete');
+    setAdminPinModalOpen(true);
+  };
+
+  const executeAdminDelete = () => {
+    if (!activeSpecies) return;
+    onDeleteSpecies(activeSpecies.id);
+    setConfirmAdminDelete(false);
+    setMode(species.length <= 1 ? 'create' : 'view');
+  };
+
+  const handleAdminSuccess = () => {
+    setAdminPinModalOpen(false);
+    if (pendingAdminAction === 'edit' && activeSpecies) {
+      setDraft(activeSpecies);
+      setMode('edit');
+    } else if (pendingAdminAction === 'delete' && activeSpecies) {
+      onDeleteSpecies(activeSpecies.id);
+      setMode(species.length <= 1 ? 'create' : 'view');
+    }
+    setPendingAdminAction(null);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draft.scientificName.trim() || !draft.commonName.trim()) return;
+    if (!currentUser) {
+      onRequestUserSession();
+      return;
+    }
+
+    onSaveSpecies(
+      {
+        ...draft,
+        scientificName: draft.scientificName.trim(),
+        commonName: draft.commonName.trim(),
+        creatorName: draft.creatorName || currentUser.observerName,
+      },
+      mode === 'create' ? initialCount : undefined,
+    );
+    onSelectSpecies(draft.id);
+    setMode('view');
+  };
+
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+      {/* Admin PIN Authentication Modal */}
+      <AdminPinModal
+        open={adminPinModalOpen}
+        title={pendingAdminAction === 'delete' ? 'Autorizar Eliminación de Especie' : 'Autorizar Edición de Especie'}
+        actionDescription={
+          pendingAdminAction === 'delete'
+            ? `Estás a punto de eliminar permanentemente la ficha de ${activeSpecies?.commonName || 'la especie'}`
+            : `Estás a punto de modificar los datos científicos de ${activeSpecies?.commonName || 'la especie'}`
+        }
+        onSuccess={handleAdminSuccess}
+        onClose={() => {
+          setAdminPinModalOpen(false);
+          setPendingAdminAction(null);
+        }}
+      />
+
+      {/* Left Species Selector List */}
+      <aside className="space-y-4 lg:col-span-4 lg:sticky lg:top-4 lg:self-start">
+        <Surface className="divide-y divide-border">
+          <div className="flex flex-wrap items-center justify-between gap-2 p-4">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">
+                Catálogo de especímenes
+              </h2>
+              <p className="text-xs text-muted">
+                {species.length} fichas biológicas guardadas
+              </p>
+            </div>
+            <Button
+              tone="primary"
+              onClick={() => {
+                setDraft(createEmptySpeciesDraft(species.length + 1, currentUser));
+                setMode('create');
+              }}
+            >
+              <FilePlus2 className="h-4 w-4" />
+              Nueva especie
+            </Button>
+          </div>
+
+          <div className="divide-y divide-border">
+            {species.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted">
+                No hay especies en el inventario. Haz clic en &quot;Nueva especie&quot; para ingresar la primera.
+              </div>
+            ) : (
+              species.map((sp) => {
+                const isSelected = mode !== 'create' && activeSpecies?.id === sp.id;
+                return (
+                  <button
+                    key={sp.id}
+                    type="button"
+                    onClick={() => {
+                      onSelectSpecies(sp.id);
+                      setMode('view');
+                    }}
+                    className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+                      isSelected
+                        ? 'bg-surface-elevated text-foreground'
+                        : 'hover:bg-foreground/5'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <span className="font-mono text-muted">
+                          {sp.catalogCode}
+                        </span>
+                        <span className="text-muted">·</span>
+                        <span className="text-muted">{sp.taxon}</span>
+                        {['CR', 'EN', 'VU'].includes(sp.iucn) || sp.medicalAlert ? (
+                          <>
+                            <span className="text-muted">·</span>
+                            <span className="font-mono text-coral">
+                              {sp.medicalAlert ? 'Ofídico' : sp.iucn}
+                            </span>
+                          </>
+                        ) : null}
+                      </div>
+                      <p className="mt-0.5 text-sm font-semibold text-foreground">
+                        {sp.commonName}
+                      </p>
+                      <p className="text-xs italic text-muted">
+                        {sp.scientificName}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-mono text-xs text-muted">
+                      {sp.elevationM} m
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </Surface>
+      </aside>
+
+      {/* Right Main Detail or Create/Edit Form */}
+      <div className="min-w-0 lg:col-span-8">
+        {mode === 'view' && activeSpecies ? (
+          <Surface className="divide-y divide-border overflow-hidden">
+            {/* Field Photograph & Header */}
+            <div className="grid grid-cols-1 md:grid-cols-12">
+              <div className="relative aspect-[16/10] bg-background md:col-span-6 md:aspect-auto">
+                <SpecimenImage
+                  src={activeSpecies.photoUrl}
+                  alt={`${activeSpecies.commonName} — ${activeSpecies.photoTag}`}
+                  scientificName={activeSpecies.scientificName}
+                  className="h-full w-full"
+                />
+                <div className="absolute bottom-3 left-3 bg-background/90 px-2.5 py-1 font-mono text-xs text-foreground">
+                  Toma: {activeSpecies.photoTag}
+                </div>
+              </div>
+
+              <div className="flex flex-col justify-between space-y-4 p-5 md:col-span-6">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted">
+                      <span className="font-mono text-secondary">
+                        {activeSpecies.catalogCode}
+                      </span>
+                      {' · '}
+                      <span>{activeSpecies.taxon}</span>
+                      {' · '}
+                      <span>{activeSpecies.curationStatus}</span>
+                    </p>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-muted border border-border px-2 py-0.5 rounded">
+                      <Lock className="h-3 w-3 text-secondary" />
+                      {currentUser?.isAdmin ? 'Acceso Administrador' : 'Edición restringida'}
+                    </span>
+                  </div>
+
+                  <h2 className="mt-1.5 text-2xl font-semibold text-foreground">
+                    {activeSpecies.commonName}
+                  </h2>
+                  <p className="text-lg italic text-muted">
+                    {activeSpecies.scientificName}
+                  </p>
+
+                  <p className="mt-3 text-xs text-foreground/90">
+                    <span>UICN: </span>
+                    <span
+                      className={
+                        ['CR', 'EN', 'VU'].includes(activeSpecies.iucn)
+                          ? 'font-mono font-semibold text-coral'
+                          : 'font-mono text-secondary'
+                      }
+                    >
+                      {activeSpecies.iucn}
+                    </span>
+                    {' · '}
+                    <span>Actividad: {activeSpecies.activityCycle}</span>
+                    {activeSpecies.medicalAlert && (
+                      <>
+                        {' · '}
+                        <span className="font-medium text-coral">
+                          ▲ Venenosa / interés médico
+                        </span>
+                      </>
+                    )}
+                  </p>
+                </div>
+
+                <div className="space-y-2 border-t border-border pt-3 font-mono text-xs text-muted">
+                  <p>
+                    WGS84: {activeSpecies.latitude.toFixed(4)}° N,{' '}
+                    {activeSpecies.longitude.toFixed(4)}° W ·{' '}
+                    {activeSpecies.elevationM} m s.n.m.
+                  </p>
+                  <p className="font-sans text-xs text-foreground">
+                    Zona Holdridge:{' '}
+                    <span className="text-secondary">
+                      {getHoldridgeZoneInfo(activeSpecies.holdridgeZone).name}
+                    </span>
+                  </p>
+                  <p className="font-sans text-xs text-muted">
+                    Localidad tipo CBLS: {activeSpecies.locality} ·{' '}
+                    {speciesSightings.length} avist. ({speciesTotalIndividuals}{' '}
+                    ind.)
+                  </p>
+                  {activeSpecies.creatorName && (
+                    <p className="font-sans text-xs text-secondary">
+                      Catalogado por: {activeSpecies.creatorName}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                  <Button
+                    tone="primary"
+                    onClick={() => onQuickSighting(activeSpecies.id)}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Registrar avistamiento
+                  </Button>
+                  <Button
+                    tone="secondary"
+                    onClick={requestEditSpecies}
+                  >
+                    {!currentUser?.isAdmin && <Lock className="h-3.5 w-3.5 text-secondary" />}
+                    <Edit3 className="h-4 w-4" />
+                    Editar ficha
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Media URLs Section (Photo, Video, Audio) */}
+            <div className="p-5 border-t border-border space-y-3">
+              <h3 className="text-sm font-semibold text-foreground">
+                Enlaces Multimedia asociados (URL)
+              </h3>
+              <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                <div className="rounded border border-border p-2">
+                  <span className="text-muted block font-medium">Foto URL:</span>
+                  {activeSpecies.photoUrl ? (
+                    <a
+                      href={activeSpecies.photoUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline truncate block"
+                    >
+                      {activeSpecies.photoUrl}
+                    </a>
+                  ) : (
+                    <span className="text-muted/60 italic">Sin URL</span>
+                  )}
+                </div>
+                <div className="rounded border border-border p-2">
+                  <span className="text-muted block font-medium">Video URL:</span>
+                  {activeSpecies.videoUrl ? (
+                    <a
+                      href={activeSpecies.videoUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline truncate block"
+                    >
+                      {activeSpecies.videoUrl}
+                    </a>
+                  ) : (
+                    <span className="text-muted/60 italic">Sin URL</span>
+                  )}
+                </div>
+                <div className="rounded border border-border p-2">
+                  <span className="text-muted block font-medium">Audio / Canto URL:</span>
+                  {activeSpecies.bioacoustics.audioUrl ? (
+                    <a
+                      href={activeSpecies.bioacoustics.audioUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline truncate block"
+                    >
+                      {activeSpecies.bioacoustics.audioUrl}
+                    </a>
+                  ) : (
+                    <span className="text-muted/60 italic">Sin URL</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Bioacoustic Status & Player */}
+            <div className="flex flex-wrap items-center justify-between gap-4 p-5">
+              <div className="min-w-0 flex-1 space-y-1">
+                <h3 className="text-base font-semibold text-foreground">
+                  Registro bioacústico de referencia
+                </h3>
+                <p className="text-xs text-muted">
+                  Estado:{' '}
+                  <span className="font-medium text-foreground">
+                    {activeSpecies.bioacoustics.hasCall || activeSpecies.bioacoustics.audioUrl
+                      ? `Sí aplica (Posee canto / audio)`
+                      : 'No aplica (Sin canto)'}
+                  </span>
+                </p>
+                <p className="pt-1 text-sm leading-relaxed text-foreground/90">
+                  {activeSpecies.bioacoustics.notes}
+                </p>
+              </div>
+              {activeSpecies.bioacoustics.hasCall || activeSpecies.bioacoustics.audioUrl ? (
+                <Button
+                  tone={isPlayingCall ? 'coral' : 'secondary'}
+                  onClick={() => handlePlayCall(activeSpecies)}
+                >
+                  {isPlayingCall ? (
+                    <>
+                      <Square className="h-4 w-4" />
+                      Detener reproducción
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="h-4 w-4 text-primary" />
+                      Reproducir canto
+                    </>
+                  )}
+                </Button>
+              ) : null}
+            </div>
+
+            {/* 5 Scientific & Ecological Research Blocks */}
+            <div className="divide-y divide-border">
+              <div className="p-5">
+                <h3 className="text-base font-semibold text-foreground">
+                  Cromática y anatomía del espécimen
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
+                  {activeSpecies.ecology.chromaticsAnatomy || 'Sin datos registrados.'}
+                </p>
+              </div>
+
+              <div className="p-5">
+                <h3 className="text-base font-semibold text-foreground">
+                  Etología y comportamiento en sitio
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
+                  {activeSpecies.ecology.ethologyBehavior || 'Sin datos registrados.'}
+                </p>
+              </div>
+
+              <div className="p-5">
+                <h3 className="text-base font-semibold text-foreground">
+                  Cortejo, reproducción y cuidado parental
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
+                  {activeSpecies.ecology.courtshipReproduction ||
+                    'Sin datos registrados.'}
+                </p>
+              </div>
+
+              <div className="p-5">
+                <h3 className="text-base font-semibold text-foreground">
+                  Relaciones intra e interespecíficas
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
+                  {activeSpecies.ecology.interIntraRelations ||
+                    'Sin datos registrados.'}
+                </p>
+              </div>
+
+              <div className="p-5">
+                <h3 className="text-base font-semibold text-foreground">
+                  Datos científicos confirmados y literatura regional
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted">
+                  {activeSpecies.ecology.confirmedReferences ||
+                    'Pendiente de verificación bibliográfica.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Curation Footer & Protected Delete Button */}
+            <div className="flex flex-wrap items-center justify-between gap-3 p-5">
+              <span className="font-mono text-xs text-muted">
+                Actualizado: {activeSpecies.updatedAt.slice(0, 10)}
+              </span>
+
+              {confirmAdminDelete ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-coral font-medium">
+                    ¿Eliminar ficha permanentemente?
+                  </span>
+                  <Button tone="quiet" onClick={() => setConfirmAdminDelete(false)}>
+                    Cancelar
+                  </Button>
+                  <Button tone="coral" onClick={executeAdminDelete}>
+                    <Trash2 className="h-4 w-4" />
+                    Confirmar eliminación
+                  </Button>
+                </div>
+              ) : (
+                <Button tone="coral" onClick={requestDeleteSpecies}>
+                  {!currentUser?.isAdmin && <Lock className="h-3.5 w-3.5" />}
+                  <Trash2 className="h-4 w-4" />
+                  Eliminar ficha
+                </Button>
+              )}
+            </div>
+          </Surface>
+        ) : (
+          /* Create / Edit Form View */
+          <Surface>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
+              <div>
+                <h2 className="text-xl font-semibold text-foreground">
+                  {mode === 'create'
+                    ? 'Registrar nueva especie manualmente (desde 0)'
+                    : `Editar ficha: ${draft.commonName}`}
+                </h2>
+                <p className="text-xs text-muted">
+                  Ingresa binomio, enlaces de fotos/videos/audios por URL y descriptores ecológicos
+                </p>
+              </div>
+              {species.length > 0 && activeSpecies && (
+                <Button tone="quiet" onClick={() => setMode('view')}>
+                  Volver a lectura
+                </Button>
+              )}
+            </div>
+
+            <form onSubmit={handleSubmit} className="divide-y divide-border">
+              {/* Block 1: Taxonomy & Basic Metadata */}
+              <div className="space-y-4 p-5">
+                <h3 className="text-base font-semibold text-foreground">
+                  Taxonomía y datos básicos de curaduría
+                </h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Nombre científico (binomio)"
+                    hint="Cursiva"
+                    htmlFor="sp-sci"
+                  >
+                    <input
+                      id="sp-sci"
+                      type="text"
+                      required
+                      placeholder="Ej. Pharomachrus mocinno"
+                      value={draft.scientificName}
+                      onChange={(e) =>
+                        setDraft((p) => ({ ...p, scientificName: e.target.value }))
+                      }
+                      className={`${inputClassName} italic`}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Nombre común / vernáculo"
+                    htmlFor="sp-common"
+                  >
+                    <input
+                      id="sp-common"
+                      type="text"
+                      required
+                      placeholder="Ej. Quetzal centroamericano"
+                      value={draft.commonName}
+                      onChange={(e) =>
+                        setDraft((p) => ({ ...p, commonName: e.target.value }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+
+                  <Field label="Grupo taxonómico" htmlFor="sp-taxon">
+                    <select
+                      id="sp-taxon"
+                      value={draft.taxon}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          taxon: e.target.value as TaxonGroup,
+                        }))
+                      }
+                      className={inputClassName}
+                    >
+                      {TAXON_GROUPS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field label="Código de catálogo CBLS" htmlFor="sp-code">
+                    <input
+                      id="sp-code"
+                      type="text"
+                      required
+                      value={draft.catalogCode}
+                      onChange={(e) =>
+                        setDraft((p) => ({ ...p, catalogCode: e.target.value }))
+                      }
+                      className={`${inputClassName} font-mono`}
+                    />
+                  </Field>
+
+                  <Field label="Categoría Lista Roja UICN" htmlFor="sp-iucn">
+                    <select
+                      id="sp-iucn"
+                      value={draft.iucn}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          iucn: e.target.value as IucnCategory,
+                        }))
+                      }
+                      className={inputClassName}
+                    >
+                      {IUCN_OPTIONS.map((opt) => (
+                        <option key={opt.code} value={opt.code}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field label="Estado de curaduría" htmlFor="sp-curation">
+                    <select
+                      id="sp-curation"
+                      value={draft.curationStatus}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          curationStatus: e.target.value as CurationStatus,
+                        }))
+                      }
+                      className={inputClassName}
+                    >
+                      <option value="Borrador local">Borrador local</option>
+                      <option value="En revisión">En revisión</option>
+                      <option value="Validado">Validado</option>
+                    </select>
+                  </Field>
+
+                  <Field label="Horario de actividad" htmlFor="sp-cycle">
+                    <select
+                      id="sp-cycle"
+                      value={draft.activityCycle}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          activityCycle:
+                            e.target.value as SpeciesRecord['activityCycle'],
+                        }))
+                      }
+                      className={inputClassName}
+                    >
+                      <option value="Diurna">Diurna</option>
+                      <option value="Nocturna">Nocturna</option>
+                      <option value="Crepuscular">Crepuscular</option>
+                      <option value="Permanente (Flora)">Permanente (Flora)</option>
+                    </select>
+                  </Field>
+
+                  <div className="flex items-end">
+                    <label className="flex min-h-12 w-full cursor-pointer items-center gap-3 rounded-control border border-border bg-input px-3.5 py-2.5 text-sm text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={draft.medicalAlert}
+                        onChange={(e) =>
+                          setDraft((p) => ({
+                            ...p,
+                            medicalAlert: e.target.checked,
+                          }))
+                        }
+                        className="h-5 w-5 accent-primary"
+                      />
+                      <span>Alerta ofídica / veneno / prioritario</span>
+                    </label>
+                  </div>
+                </div>
+
+                {mode === 'create' && (
+                  <div className="border-t border-border pt-4">
+                    <Field
+                      label="Individuos observados en el hallazgo inicial (Opcional)"
+                      htmlFor="sp-init-count"
+                    >
+                      <StepperInput
+                        id="sp-init-count"
+                        value={initialCount}
+                        min={0}
+                        max={200}
+                        unit="ind."
+                        onChange={setInitialCount}
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
+
+              {/* Block 2: Multimedia por URL (Fotos, Videos, Audios) */}
+              <div className="space-y-4 p-5">
+                <h3 className="text-base font-semibold text-foreground">
+                  Multimedia por Enlace URL (Imágenes, Videos, Audios)
+                </h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field
+                    label="URL de Fotografía Principal"
+                    hint="Pega enlace https://..."
+                    htmlFor="sp-photo-url"
+                  >
+                    <input
+                      id="sp-photo-url"
+                      type="url"
+                      placeholder="https://ejemplo.com/quetzal.jpg"
+                      value={draft.photoUrl}
+                      onChange={(e) =>
+                        setDraft((p) => ({ ...p, photoUrl: e.target.value }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+
+                  <Field
+                    label="Etiqueta anatómica de la foto"
+                    htmlFor="sp-photo-tag"
+                  >
+                    <select
+                      id="sp-photo-tag"
+                      value={draft.photoTag}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          photoTag: e.target.value as PhotoTag,
+                        }))
+                      }
+                      className={inputClassName}
+                    >
+                      {PHOTO_TAGS.map((tag) => (
+                        <option key={tag} value={tag}>
+                          {tag}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field
+                    label="URL de Video (opcional)"
+                    hint="YouTube, Vimeo o video directo"
+                    htmlFor="sp-video-url"
+                  >
+                    <input
+                      id="sp-video-url"
+                      type="url"
+                      placeholder="https://ejemplo.com/comportamiento.mp4"
+                      value={draft.videoUrl || ''}
+                      onChange={(e) =>
+                        setDraft((p) => ({ ...p, videoUrl: e.target.value }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+
+                  <Field
+                    label="URL de Canto / Audio (opcional)"
+                    hint="MP3, WAV o enlace sonoro"
+                    htmlFor="sp-audio-url"
+                  >
+                    <input
+                      id="sp-audio-url"
+                      type="url"
+                      placeholder="https://ejemplo.com/canto_macho.mp3"
+                      value={draft.bioacoustics.audioUrl || ''}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          bioacoustics: { ...p.bioacoustics, audioUrl: e.target.value },
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              {/* Block 3: Bioacoustics */}
+              <div className="space-y-4 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold text-foreground">
+                      Registro bioacústico
+                    </h3>
+                    <p className="text-xs text-muted">
+                      Define si el taxón posee canto o estridulación
+                    </p>
+                  </div>
+
+                  <div role="group" aria-label="Estado bioacústico" className="flex flex-wrap gap-2">
+                    <Button
+                      tone={!draft.bioacoustics.hasCall ? 'primary' : 'quiet'}
+                      onClick={() =>
+                        setDraft((p) => ({
+                          ...p,
+                          bioacoustics: {
+                            ...p.bioacoustics,
+                            hasCall: false,
+                            notes: p.bioacoustics.notes || 'No aplica (Sin canto).',
+                          },
+                        }))
+                      }
+                    >
+                      No aplica (Sin canto)
+                    </Button>
+                    <Button
+                      tone={draft.bioacoustics.hasCall ? 'primary' : 'quiet'}
+                      onClick={() =>
+                        setDraft((p) => ({
+                          ...p,
+                          bioacoustics: {
+                            ...p.bioacoustics,
+                            hasCall: true,
+                            dominantFreqKhz: p.bioacoustics.dominantFreqKhz ?? 2.4,
+                            pulsePattern: p.bioacoustics.pulsePattern ?? 'pulse',
+                          },
+                        }))
+                      }
+                    >
+                      Sí aplica (Posee canto)
+                    </Button>
+                  </div>
+                </div>
+
+                {draft.bioacoustics.hasCall && (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field
+                      label="Frecuencia dominante (kHz)"
+                      htmlFor="sp-freq"
+                    >
+                      <StepperInput
+                        id="sp-freq"
+                        value={draft.bioacoustics.dominantFreqKhz ?? 2.4}
+                        min={0.4}
+                        max={9.5}
+                        step={0.1}
+                        unit="kHz"
+                        onChange={(val) =>
+                          setDraft((p) => ({
+                            ...p,
+                            bioacoustics: {
+                              ...p.bioacoustics,
+                              dominantFreqKhz: val,
+                            },
+                          }))
+                        }
+                      />
+                    </Field>
+
+                    <Field label="Patrón espectral sintético" htmlFor="sp-pattern">
+                      <select
+                        id="sp-pattern"
+                        value={draft.bioacoustics.pulsePattern ?? 'pulse'}
+                        onChange={(e) =>
+                          setDraft((p) => ({
+                            ...p,
+                            bioacoustics: {
+                              ...p.bioacoustics,
+                              pulsePattern: e.target.value as
+                                | 'flute'
+                                | 'pulse'
+                                | 'whistle'
+                                | 'chirp',
+                            },
+                          }))
+                        }
+                        className={inputClassName}
+                      >
+                        <option value="flute">Silbido aflautado (Aves)</option>
+                        <option value="pulse">Pulsos repetitivos (Anfibios)</option>
+                        <option value="chirp">Chirridos metálicos (Insectos/Aves)</option>
+                        <option value="whistle">Silbido descendente (Mamíferos)</option>
+                      </select>
+                    </Field>
+                  </div>
+                )}
+
+                <Field
+                  label="Notas de bioacústica y contexto de emisión"
+                  htmlFor="sp-bio-notes"
+                >
+                  <textarea
+                    id="sp-bio-notes"
+                    rows={2}
+                    value={draft.bioacoustics.notes}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        bioacoustics: { ...p.bioacoustics, notes: e.target.value },
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+              </div>
+
+              {/* Block 4: GPS & Holdridge Life Zone */}
+              <div className="space-y-4 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-base font-semibold text-foreground">
+                      Ubicación geográfica y Zona de Vida Holdridge
+                    </h3>
+                    <p className="text-xs text-muted">
+                      Al ingresar la altitud se sugiere automáticamente la Zona Holdridge
+                    </p>
+                  </div>
+                  <Button tone="secondary" onClick={handleCaptureGps}>
+                    <Compass className="h-4 w-4" />
+                    Capturar GPS
+                  </Button>
+                </div>
+
+                {gpsNotice && (
+                  <p role="status" className="font-mono text-xs text-secondary">
+                    {gpsNotice}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <Field label="Latitud WGS84 (°N)" htmlFor="sp-lat">
+                    <input
+                      id="sp-lat"
+                      type="number"
+                      step="0.0001"
+                      value={draft.latitude}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (!Number.isNaN(v)) {
+                          setDraft((p) => ({ ...p, latitude: v }));
+                        }
+                      }}
+                      className={`${inputClassName} font-mono tabular-nums`}
+                    />
+                  </Field>
+
+                  <Field label="Longitud WGS84 (°W)" htmlFor="sp-lon">
+                    <input
+                      id="sp-lon"
+                      type="number"
+                      step="0.0001"
+                      value={draft.longitude}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (!Number.isNaN(v)) {
+                          setDraft((p) => ({ ...p, longitude: v }));
+                        }
+                      }}
+                      className={`${inputClassName} font-mono tabular-nums`}
+                    />
+                  </Field>
+
+                  <Field label="Elevación (m s.n.m.)" htmlFor="sp-elev">
+                    <StepperInput
+                      id="sp-elev"
+                      value={draft.elevationM}
+                      min={400}
+                      max={3500}
+                      step={25}
+                      unit="m"
+                      onChange={(alt) =>
+                        setDraft((p) => ({
+                          ...p,
+                          elevationM: alt,
+                          holdridgeZone: detectHoldridgeZoneByElevation(alt),
+                        }))
+                      }
+                    />
+                  </Field>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field
+                    label="Zona de Vida Holdridge"
+                    htmlFor="sp-zone"
+                  >
+                    <select
+                      id="sp-zone"
+                      value={draft.holdridgeZone}
+                      onChange={(e) =>
+                        setDraft((p) => ({
+                          ...p,
+                          holdridgeZone: e.target.value as HoldridgeZoneId,
+                        }))
+                      }
+                      className={inputClassName}
+                    >
+                      {HOLDRIDGE_ZONES.map((z) => (
+                        <option key={z.id} value={z.id}>
+                          {z.name} ({z.minElevation}–{z.maxElevation} m)
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field label="Localidad específica CBLS" htmlFor="sp-loc">
+                    <input
+                      id="sp-loc"
+                      type="text"
+                      required
+                      value={draft.locality}
+                      onChange={(e) =>
+                        setDraft((p) => ({ ...p, locality: e.target.value }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              {/* Block 5: Ecological & Diagnostic Research Fields */}
+              <div className="space-y-4 p-5">
+                <h3 className="text-base font-semibold text-foreground">
+                  Campos de investigación biológica y ecología
+                </h3>
+
+                <Field
+                  label="Cromática y anatomía del espécimen"
+                  hint="Morfología diagnóstica, patrones de color, escamación, plumaje o follaje"
+                  htmlFor="eco-chrom"
+                >
+                  <textarea
+                    id="eco-chrom"
+                    rows={3}
+                    value={draft.ecology.chromaticsAnatomy}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        ecology: {
+                          ...p.ecology,
+                          chromaticsAnatomy: e.target.value,
+                        },
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+
+                <Field
+                  label="Etología y comportamiento en sitio"
+                  hint="Termorregulación, estrato vertical, forrajeo y desplazamiento"
+                  htmlFor="eco-etho"
+                >
+                  <textarea
+                    id="eco-etho"
+                    rows={3}
+                    value={draft.ecology.ethologyBehavior}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        ecology: {
+                          ...p.ecology,
+                          ethologyBehavior: e.target.value,
+                        },
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+
+                <Field
+                  label="Cortejo, reproducción y cuidado parental"
+                  htmlFor="eco-repro"
+                >
+                  <textarea
+                    id="eco-repro"
+                    rows={2}
+                    value={draft.ecology.courtshipReproduction}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        ecology: {
+                          ...p.ecology,
+                          courtshipReproduction: e.target.value,
+                        },
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+
+                <Field
+                  label="Relaciones intra e interespecíficas"
+                  htmlFor="eco-rel"
+                >
+                  <textarea
+                    id="eco-rel"
+                    rows={2}
+                    value={draft.ecology.interIntraRelations}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        ecology: {
+                          ...p.ecology,
+                          interIntraRelations: e.target.value,
+                        },
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+
+                <Field
+                  label="Datos científicos confirmados"
+                  htmlFor="eco-ref"
+                >
+                  <textarea
+                    id="eco-ref"
+                    rows={2}
+                    value={draft.ecology.confirmedReferences}
+                    onChange={(e) =>
+                      setDraft((p) => ({
+                        ...p,
+                        ecology: {
+                          ...p.ecology,
+                          confirmedReferences: e.target.value,
+                        },
+                      }))
+                    }
+                    className={textareaClassName}
+                  />
+                </Field>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-3 p-5">
+                {species.length > 0 && activeSpecies && (
+                  <Button tone="quiet" onClick={() => setMode('view')}>
+                    Cancelar
+                  </Button>
+                )}
+                <Button tone="primary" type="submit">
+                  Guardar ficha en catálogo CBLS
+                </Button>
+              </div>
+            </form>
+          </Surface>
+        )}
+      </div>
+    </div>
+  );
+};

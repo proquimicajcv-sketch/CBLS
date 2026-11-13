@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "Bitácora CBLS — Corredor Biológico Los Santos",
+  "short_name": "BioCBLS",
+  "description": "Plataforma de campo autónoma para el inventario biológico y monitoreo participativo en el Corredor Biológico Los Santos.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#030F0A",
+  "theme_color": "#030F0A",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

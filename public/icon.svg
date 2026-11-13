@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="100" fill="#0F2E1B"/>
+  <circle cx="256" cy="256" r="210" fill="#164024" stroke="#55CB45" stroke-width="8"/>
+  <!-- Mountain ridge & forest canopy -->
+  <path d="M110 370 L195 210 L260 290 L330 160 L410 370 Z" fill="#1E5631" stroke="#55CB45" stroke-width="12" stroke-linejoin="round"/>
+  <!-- Sun / Bio-Lime Point -->
+  <circle cx="330" cy="160" r="28" fill="#B5FF42" stroke="#0F2E1B" stroke-width="6"/>
+  <!-- Curved altitudinal transect line -->
+  <path d="M120 400 Q256 360 392 400" stroke="#B5FF42" stroke-width="16" stroke-linecap="round"/>
+  <!-- Text CBLS -->
+  <text x="256" y="445" text-anchor="middle" fill="#FFF5D1" font-family="Space Grotesk, sans-serif" font-weight="700" font-size="44" letter-spacing="4">CBLS</text>
+</svg>

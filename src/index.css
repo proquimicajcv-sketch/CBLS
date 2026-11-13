@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme static {
+  --color-background: #030f0a;
+  --color-surface: #071912;
+  --color-surface-elevated: #0c261b;
+  --color-input: #05140e;
+  --color-foreground: #f0fdf7;
+  --color-muted: #8eb3a0;
+  --color-border: rgba(134, 229, 176, 0.16);
+
+  --color-primary: #86e5b0;
+  --color-primary-foreground: #03150d;
+
+  --color-secondary: #34d399;
+  --color-secondary-foreground: #03150d;
+
+  --color-coral: #ff7a59;
+  --color-coral-foreground: #2b0900;
+
+  /* Categorical taxon palette (distinct hues, high visibility on obsidian emerald) */
+  --color-taxon-aves: #86e5b0;
+  --color-taxon-anfibios: #a3e635;
+  --color-taxon-reptiles: #ff8b54;
+  --color-taxon-mamiferos: #f2c96d;
+  --color-taxon-plantas: #34d399;
+  --color-taxon-insectos: #7cc6fe;
+
+  --font-display: "Outfit", sans-serif;
+  --font-sans: "Plus Jakarta Sans", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --text-display: clamp(1.9rem, 1.45rem + 1.2vw, 2.75rem);
+  --text-display--line-height: 1.1;
+  --text-display--font-weight: 700;
+
+  --text-headline: clamp(1.25rem, 1.1rem + 0.5vw, 1.625rem);
+  --text-headline--line-height: 1.22;
+  --text-headline--font-weight: 600;
+
+  --text-title: 1.125rem;
+  --text-title--line-height: 1.33;
+  --text-title--font-weight: 600;
+
+  --radius-card: 0.75rem;
+  --radius-sheet: 1rem;
+  --radius-control: 0.5rem;
+  --shadow-surface: 0 0 transparent;
+}
+
+html {
+  font-family: var(--font-sans);
+  font-synthesis-weight: none;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  text-wrap: balance;
+}
+
+.carto-halo {
+  paint-order: stroke;
+  stroke: #030f0a;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin):not(.animate-pulse),
+  *:not(.animate-spin):not(.animate-pulse)::before,
+  *:not(.animate-spin):not(.animate-pulse)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

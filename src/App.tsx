@@ -1,0 +1,460 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  BarChart3,
+  BookOpen,
+  Compass,
+  Database,
+  Home,
+  Layers,
+  Plus,
+  UserCheck,
+  Wifi,
+  WifiOff,
+} from 'lucide-react';
+import { MotionConfig } from 'motion/react';
+import { BackupModule } from './components/BackupModule';
+import { CatalogModule } from './components/CatalogModule';
+import { CollectionModule } from './components/CollectionModule';
+import { DashboardModule } from './components/DashboardModule';
+import { GisMapModule } from './components/GisMapModule';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { SightingModal } from './components/SightingModal';
+import { StatsModule } from './components/StatsModule';
+import { Button } from './components/ui';
+import { UserSessionModal } from './components/UserSessionModal';
+import { useCblsStore } from './hooks/useCblsStore';
+import type { AppModuleId, HoldridgeZoneId } from './types/cbls';
+
+const LEFT_NAV_ITEMS: Array<{
+  id: AppModuleId;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: 'portada', label: 'Portada', icon: Home },
+  { id: 'fichas', label: 'Ficha', icon: BookOpen },
+  { id: 'mapa', label: 'Mapa SIG', icon: Compass },
+];
+
+const RIGHT_NAV_ITEMS: Array<{
+  id: AppModuleId;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: 'coleccion', label: 'Colección', icon: Layers },
+  { id: 'estadistica', label: 'Estadística', icon: BarChart3 },
+  { id: 'respaldo', label: 'Respaldo', icon: Database },
+];
+
+export default function App() {
+  const store = useCblsStore();
+
+  const [activeModule, setActiveModule] = useState<AppModuleId>('portada');
+  const [selectedSpeciesId, setSelectedSpeciesId] = useState<string | null>(
+    store.species[0]?.id ?? null,
+  );
+  const [startCatalogInCreate, setStartCatalogInCreate] =
+    useState<boolean>(false);
+  const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState<boolean>(false);
+
+  // User session identification modal
+  const [userSessionModalOpen, setUserSessionModalOpen] = useState<boolean>(
+    () => !store.userSession,
+  );
+
+  // Sighting modal states
+  const [sightingModalOpen, setSightingModalOpen] = useState<boolean>(false);
+  const [sightingModalSpeciesId, setSightingModalSpeciesId] = useState<
+    string | undefined
+  >(undefined);
+  const [sightingPresetCoords, setSightingPresetCoords] = useState<{
+    latitude: number;
+    longitude: number;
+    elevationM: number;
+    holdridgeZone: HoldridgeZoneId;
+    localityHint?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const onQuotaExceeded = () => setMapsQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
+    return () => {
+      window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
+    };
+  }, []);
+
+  const handleOpenSpeciesDetail = useCallback((speciesId: string) => {
+    setSelectedSpeciesId(speciesId);
+    setStartCatalogInCreate(false);
+    setActiveModule('fichas');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleOpenNewSpecies = useCallback(() => {
+    if (!store.userSession) {
+      setUserSessionModalOpen(true);
+      return;
+    }
+    setStartCatalogInCreate(true);
+    setActiveModule('fichas');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [store.userSession]);
+
+  const handleClearCreateMode = useCallback(() => {
+    setStartCatalogInCreate(false);
+  }, []);
+
+  const handleQuickSighting = useCallback(
+    (speciesId?: string) => {
+      if (!store.userSession) {
+        setUserSessionModalOpen(true);
+        return;
+      }
+      setSightingModalSpeciesId(speciesId);
+      setSightingPresetCoords(null);
+      setSightingModalOpen(true);
+    },
+    [store.userSession],
+  );
+
+  const handleRegisterAtMapPoint = useCallback(
+    (coords: {
+      latitude: number;
+      longitude: number;
+      elevationM: number;
+      holdridgeZone: HoldridgeZoneId;
+      localityHint: string;
+    }) => {
+      if (!store.userSession) {
+        setUserSessionModalOpen(true);
+        return;
+      }
+      setSightingModalSpeciesId(selectedSpeciesId ?? store.species[0]?.id);
+      setSightingPresetCoords(coords);
+      setSightingModalOpen(true);
+    },
+    [selectedSpeciesId, store.species, store.userSession],
+  );
+
+  const renderNavButton = (item: {
+    id: AppModuleId;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }) => {
+    const Icon = item.icon;
+    const isCurrent = activeModule === item.id;
+    return (
+      <li key={item.id} className="min-w-0">
+        <button
+          type="button"
+          aria-current={isCurrent ? 'page' : undefined}
+          onClick={() => {
+            setActiveModule(item.id);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`flex min-h-12 w-full flex-col items-center justify-center gap-1 whitespace-nowrap rounded-lg px-1 py-1 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+            isCurrent
+              ? 'text-primary font-semibold'
+              : 'text-muted hover:text-foreground'
+          }`}
+        >
+          <span
+            className={`flex h-7 w-9 items-center justify-center rounded-md transition-colors ${
+              isCurrent ? 'bg-primary/15 text-primary' : 'bg-transparent'
+            }`}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+          </span>
+          <span className="truncate">{item.label}</span>
+        </button>
+      </li>
+    );
+  };
+
+  return (
+    <MotionConfig reducedMotion="user">
+      <div className="min-h-dvh bg-background pb-24 text-foreground">
+        {/* Google Maps Platform Quota Exceeded Sticky Banner */}
+        {mapsQuotaExceeded && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+            <span>
+              Google Maps Platform quota reached. If you are the app owner, visit{' '}
+              <a
+                href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-semibold text-amber-950 hover:text-amber-800"
+              >
+                maps developer site
+              </a>{' '}
+              for instructions to update your account.
+            </span>
+          </div>
+        )}
+
+        {/* Device User Session Modal */}
+        <UserSessionModal
+          open={userSessionModalOpen}
+          currentSession={store.userSession}
+          onSave={(name, code) => {
+            const res = store.saveUserSession(name, code);
+            if (res.ok) setUserSessionModalOpen(false);
+            return res;
+          }}
+          onClose={() => setUserSessionModalOpen(false)}
+          canCancel={Boolean(store.userSession)}
+        />
+
+        {/* Compact Institutional Header for non-portada modules */}
+        {activeModule !== 'portada' && (
+          <header className="sticky top-0 z-30 border-b border-border bg-[#04110B]/92 backdrop-blur-md">
+            <div className="mx-auto flex max-w-[90rem] flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
+              <button
+                type="button"
+                onClick={() => setActiveModule('portada')}
+                className="flex min-w-0 items-center gap-3 text-left"
+              >
+                <svg
+                  viewBox="0 0 44 44"
+                  aria-hidden="true"
+                  className="h-9 w-9 shrink-0 rounded-lg border border-primary/35 bg-[#071D14] p-1"
+                >
+                  <path
+                    d="M6 34 L16 16 L24 26 L31 11 L38 34 Z"
+                    fill="#0D3826"
+                    stroke="#86E5B0"
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="31" cy="11" r="3" fill="#86E5B0" />
+                  <path
+                    d="M8 37 Q22 33 36 37"
+                    fill="none"
+                    stroke="#34D399"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="font-display text-lg font-bold tracking-tight text-primary">
+                      Bitácora CBLS
+                    </span>
+                    <span className="font-mono text-[11px] text-secondary">
+                      Los Santos · CR
+                    </span>
+                  </div>
+                  <p className="max-w-xs truncate text-[11px] text-muted">
+                    Sistema de Bitácora de Campo & Taxonomía
+                  </p>
+                </div>
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setUserSessionModalOpen(true)}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border bg-[#061810] px-3 py-1 text-xs text-foreground hover:border-primary/50"
+                  title="Cambiar persona o código de acceso"
+                >
+                  <UserCheck className="h-3.5 w-3.5 text-primary" />
+                  <span className="max-w-[140px] truncate font-medium">
+                    {store.userSession?.observerName || 'Identificarme'}
+                  </span>
+                  {store.userSession?.isAdmin && (
+                    <span className="font-mono font-semibold text-primary">
+                      · Admin
+                    </span>
+                  )}
+                </button>
+
+                <PWAInstallButton />
+
+                <button
+                  type="button"
+                  onClick={() => setActiveModule('respaldo')}
+                  className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-[#061810] px-3 text-xs font-medium text-foreground transition-colors hover:border-primary/50"
+                >
+                  {store.effectiveOffline ? (
+                    <>
+                      <WifiOff className="h-3.5 w-3.5 text-coral" />
+                      <span className="text-coral">Offline</span>
+                    </>
+                  ) : (
+                    <>
+                      <Wifi className="h-3.5 w-3.5 text-primary" />
+                      <span className="text-primary">En vivo</span>
+                    </>
+                  )}
+                </button>
+
+                <Button
+                  tone="primary"
+                  onClick={() => handleQuickSighting()}
+                  className="min-h-9 px-3 text-xs"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Avistamiento
+                </Button>
+              </div>
+            </div>
+          </header>
+        )}
+
+        {/* Inline Feedback / Storage Banner */}
+        {(store.storageError || store.statusMessage) && (
+          <div
+            role="status"
+            className="border-b border-border bg-surface-elevated px-4 py-2 text-xs sm:px-6"
+          >
+            <div className="mx-auto flex max-w-[90rem] items-center justify-between gap-3">
+              <span
+                className={
+                  store.storageError ? 'text-coral' : 'text-foreground'
+                }
+              >
+                {store.storageError ?? store.statusMessage}
+              </span>
+              <button
+                type="button"
+                onClick={store.clearStatusMessage}
+                className="shrink-0 font-mono text-xs text-muted underline hover:text-foreground"
+              >
+                Ocultar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Main Active Module Workspace */}
+        <main
+          className={
+            activeModule === 'portada'
+              ? 'mx-auto max-w-[90rem]'
+              : 'mx-auto max-w-[90rem] px-4 pt-5 sm:px-6 sm:pt-6'
+          }
+        >
+          {activeModule === 'portada' && (
+            <DashboardModule
+              species={store.species}
+              sightings={store.sightings}
+              changeLogs={store.changeLogs}
+              totalIndividuals={store.totalIndividuals}
+              currentUser={store.userSession}
+              effectiveOffline={store.effectiveOffline}
+              pendingSyncCount={store.pendingSyncCount}
+              checksum={store.checksum}
+              pwaInstallSlot={<PWAInstallButton />}
+              onRequestUserSession={() => setUserSessionModalOpen(true)}
+              onNavigate={setActiveModule}
+              onOpenSpeciesDetail={handleOpenSpeciesDetail}
+              onOpenNewSpecies={handleOpenNewSpecies}
+              onQuickSighting={handleQuickSighting}
+            />
+          )}
+
+          {activeModule === 'fichas' && (
+            <CatalogModule
+              species={store.species}
+              sightings={store.sightings}
+              selectedSpeciesId={selectedSpeciesId}
+              startInCreateMode={startCatalogInCreate}
+              currentUser={store.userSession}
+              onRequestUserSession={() => setUserSessionModalOpen(true)}
+              onSelectSpecies={setSelectedSpeciesId}
+              onClearCreateMode={handleClearCreateMode}
+              onSaveSpecies={store.upsertSpecies}
+              onDeleteSpecies={store.deleteSpecies}
+              onQuickSighting={handleQuickSighting}
+            />
+          )}
+
+          {activeModule === 'mapa' && (
+            <GisMapModule
+              species={store.species}
+              sightings={store.sightings}
+              onOpenSpeciesDetail={handleOpenSpeciesDetail}
+              onRegisterAtPoint={handleRegisterAtMapPoint}
+            />
+          )}
+
+          {activeModule === 'coleccion' && (
+            <CollectionModule
+              species={store.species}
+              sightings={store.sightings}
+              currentUser={store.userSession}
+              onOpenSpeciesDetail={handleOpenSpeciesDetail}
+              onQuickSighting={handleQuickSighting}
+              onOpenNewSpecies={handleOpenNewSpecies}
+              onDeleteSpecies={store.deleteSpecies}
+            />
+          )}
+
+          {activeModule === 'estadistica' && (
+            <StatsModule
+              species={store.species}
+              sightings={store.sightings}
+            />
+          )}
+
+          {activeModule === 'respaldo' && (
+            <BackupModule
+              species={store.species}
+              sightings={store.sightings}
+              syncLogs={store.syncLogs}
+              changeLogs={store.changeLogs}
+              userSession={store.userSession}
+              onRequestUserSession={() => setUserSessionModalOpen(true)}
+              offlineAutonomousMode={store.offlineAutonomousMode}
+              effectiveOffline={store.effectiveOffline}
+              lastSavedIso={store.lastSavedIso}
+              pendingSyncCount={store.pendingSyncCount}
+              checksum={store.checksum}
+              storageBytes={store.storageBytes}
+              onToggleAutonomousMode={store.toggleAutonomousMode}
+              onSyncNow={store.syncPendingRecords}
+              onExportObject={store.exportBackupObject}
+              onImportJson={store.importBackupJson}
+              onResetAllDataToZero={store.resetAllDataToZero}
+            />
+          )}
+        </main>
+
+        {/* Native-Style Floating Bottom Navigation Bar with Centered + */}
+        <nav
+          aria-label="Navegación principal de módulos CBLS"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-primary/20 bg-[#04120C]/94 px-2 py-1.5 backdrop-blur-md"
+        >
+          <ul className="mx-auto grid max-w-4xl grid-cols-7 items-center gap-1">
+            {LEFT_NAV_ITEMS.map(renderNavButton)}
+
+            <li className="flex justify-center">
+              <button
+                type="button"
+                aria-label="Registrar avistamiento rápido"
+                title="Registrar avistamiento en campo"
+                onClick={() => handleQuickSighting()}
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-primary/50 bg-[#0B2D1F] text-primary transition-transform hover:scale-105 hover:bg-primary hover:text-primary-foreground active:scale-95 focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                <Plus className="h-5 w-5" />
+              </button>
+            </li>
+
+            {RIGHT_NAV_ITEMS.map(renderNavButton)}
+          </ul>
+        </nav>
+
+        {/* Modal for Georeferenced Sighting Registration */}
+        <SightingModal
+          open={sightingModalOpen}
+          speciesList={store.species}
+          initialSpeciesId={sightingModalSpeciesId}
+          presetCoords={sightingPresetCoords}
+          currentUser={store.userSession}
+          onRequestUserSession={() => setUserSessionModalOpen(true)}
+          onClose={() => setSightingModalOpen(false)}
+          onSave={store.addSighting}
+        />
+      </div>
+    </MotionConfig>
+  );
+}
