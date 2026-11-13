@@ -63,15 +63,16 @@ export interface SpeciesRecord {
   iucn: IucnCategory;
   medicalAlert: boolean;
   curationStatus: CurationStatus;
+  isSample?: boolean;
   photoUrl: string; // URL based
   videoUrl?: string; // URL for video
   photoTag: PhotoTag;
   bioacoustics: BioacousticData;
-  latitude: number;
-  longitude: number;
-  elevationM: number;
-  locality: string;
-  holdridgeZone: HoldridgeZoneId;
+  latitude?: number;
+  longitude?: number;
+  elevationM?: number;
+  locality?: string;
+  holdridgeZone?: HoldridgeZoneId;
   activityCycle: 'Diurna' | 'Nocturna' | 'Crepuscular' | 'Permanente (Flora)';
   ecology: EcologyFields;
   featuredNote?: string;

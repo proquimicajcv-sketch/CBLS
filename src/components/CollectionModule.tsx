@@ -48,12 +48,16 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const sightingStatsBySpecies = useMemo(() => {
-    const map = new Map<string, { sightingsCount: number; individuals: number }>();
+    const map = new Map<
+      string,
+      { sightingsCount: number; individuals: number; latestSighting?: SightingEntry }
+    >();
     sightings.forEach((s) => {
       const prev = map.get(s.speciesId) ?? { sightingsCount: 0, individuals: 0 };
       map.set(s.speciesId, {
         sightingsCount: prev.sightingsCount + 1,
         individuals: prev.individuals + s.individualCount,
+        latestSighting: prev.latestSighting ?? s,
       });
     });
     return map;
@@ -80,11 +84,13 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
       if (curationFilter !== 'Todos' && sp.curationStatus !== curationFilter)
         return false;
       if (!normalized) return true;
-      const zoneName = getHoldridgeZoneInfo(sp.holdridgeZone).name.toLowerCase();
+      const zoneName = sp.holdridgeZone
+        ? getHoldridgeZoneInfo(sp.holdridgeZone).name.toLowerCase()
+        : '';
       return (
         sp.scientificName.toLowerCase().includes(normalized) ||
         sp.commonName.toLowerCase().includes(normalized) ||
-        sp.locality.toLowerCase().includes(normalized) ||
+        (sp.locality || '').toLowerCase().includes(normalized) ||
         sp.catalogCode.toLowerCase().includes(normalized) ||
         zoneName.includes(normalized)
       );
@@ -255,8 +261,11 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
             const stats = sightingStatsBySpecies.get(sp.id) ?? {
               sightingsCount: 0,
               individuals: 0,
+              latestSighting: undefined,
             };
-            const zone = getHoldridgeZoneInfo(sp.holdridgeZone);
+            const latestZone = stats.latestSighting
+              ? getHoldridgeZoneInfo(stats.latestSighting.holdridgeZone)
+              : null;
 
             return (
               <Surface
@@ -271,6 +280,9 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                       scientificName={sp.scientificName}
                       className="h-full w-full"
                     />
+                    <span className="absolute left-2.5 top-2.5 rounded-full border border-primary/35 bg-[#04110B]/90 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-primary">
+                      Muestra
+                    </span>
                   </div>
 
                   <div className="space-y-2 p-4">
@@ -310,13 +322,21 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                     </div>
 
                     <p className="line-clamp-2 text-xs leading-relaxed text-foreground/85">
-                      {sp.ecology.chromaticsAnatomy || 'Ficha de campo registrada en CBLS.'}
+                      {sp.ecology.chromaticsAnatomy || 'Especie de muestra en catálogo CBLS.'}
                     </p>
 
                     <div className="pt-1 font-mono text-xs text-muted">
-                      <span>{sp.elevationM} m s.n.m.</span>
-                      {' · '}
-                      <span className="font-sans">{zone.shortName}</span>
+                      {stats.latestSighting && latestZone ? (
+                        <>
+                          <span>{stats.latestSighting.elevationM} m s.n.m.</span>
+                          {' · '}
+                          <span className="font-sans">{latestZone.shortName}</span>
+                        </>
+                      ) : (
+                        <span className="font-sans text-primary/85">
+                          Especie de muestra · Lista para registrar avistamientos
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

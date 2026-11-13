@@ -52,19 +52,19 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   });
 
   const [latitude, setLatitude] = useState<number>(
-    presetCoords?.latitude ?? defaultSp?.latitude ?? 9.5518,
+    presetCoords?.latitude ?? 9.5525,
   );
   const [longitude, setLongitude] = useState<number>(
-    presetCoords?.longitude ?? defaultSp?.longitude ?? -83.8062,
+    presetCoords?.longitude ?? -83.8065,
   );
   const [elevationM, setElevationM] = useState<number>(
-    presetCoords?.elevationM ?? defaultSp?.elevationM ?? 2380,
+    presetCoords?.elevationM ?? 2240,
   );
   const [holdridgeZone, setHoldridgeZone] = useState<HoldridgeZoneId>(
-    presetCoords?.holdridgeZone ?? defaultSp?.holdridgeZone ?? 'bp-MB',
+    presetCoords?.holdridgeZone ?? 'bp-MB',
   );
   const [locality, setLocality] = useState<string>(
-    presetCoords?.localityHint ?? defaultSp?.locality ?? 'San Gerardo de Dota',
+    presetCoords?.localityHint ?? '',
   );
   const [microhabitat, setMicrohabitat] = useState<string>(
     'Sotobosque húmedo sobre vegetación epífita',
@@ -84,22 +84,16 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     const sp = speciesList.find((s) => s.id === initialSpeciesId) ?? speciesList[0];
     if (sp) {
       setSpeciesId(sp.id);
-      if (!presetCoords) {
-        setLatitude(sp.latitude);
-        setLongitude(sp.longitude);
-        setElevationM(sp.elevationM);
-        setHoldridgeZone(sp.holdridgeZone);
-        setLocality(sp.locality);
-      }
     }
     if (presetCoords) {
       setLatitude(presetCoords.latitude);
       setLongitude(presetCoords.longitude);
       setElevationM(presetCoords.elevationM);
       setHoldridgeZone(presetCoords.holdridgeZone);
-      if (presetCoords.localityHint) {
-        setLocality(presetCoords.localityHint);
-      }
+      setLocality(presetCoords.localityHint ?? '');
+    } else {
+      setLocality('');
+      setGpsStatus(null);
     }
   }, [open, initialSpeciesId, presetCoords, speciesList]);
 
@@ -434,6 +428,7 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                   id="obs-locality"
                   type="text"
                   required
+                  placeholder="Ej. Sendero Los Quetzales, San Gerardo de Dota"
                   value={locality}
                   onChange={(e) => setLocality(e.target.value)}
                   className={inputClassName}

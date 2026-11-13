@@ -353,8 +353,8 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                 <span className="rounded-full border border-white/15 bg-[#08120F]/90 px-3.5 py-1.5 font-mono text-xs text-white/80">
                   CAT. {featuredSpecies.catalogCode}
                 </span>
-                <span className="font-mono text-[11px] text-white/65">
-                  UICN {featuredSpecies.iucn} · {featuredSpecies.elevationM} m
+                <span className="font-mono text-[11px] text-[#B8EBD0]">
+                  Muestra · UICN {featuredSpecies.iucn}
                 </span>
               </div>
             </div>
@@ -626,12 +626,13 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
 
           <div className="divide-y divide-border sm:grid sm:grid-cols-5 sm:divide-x sm:divide-y-0">
             {HOLDRIDGE_ZONES.map((zone) => {
-              const zoneSpeciesCount = species.filter(
-                (s) => s.holdridgeZone === zone.id,
-              ).length;
-              const zoneSightingCount = sightings.filter(
+              const zoneSightings = sightings.filter(
                 (o) => o.holdridgeZone === zone.id,
-              ).length;
+              );
+              const zoneSightingCount = zoneSightings.length;
+              const zoneSpeciesCount = new Set(
+                zoneSightings.map((o) => o.speciesId),
+              ).size;
               return (
                 <div key={zone.id} className="p-4">
                   <p className="font-mono text-xs text-primary">

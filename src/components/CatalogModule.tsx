@@ -1,18 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Compass,
   Edit3,
   FilePlus2,
   Lock,
+  MapPin,
   Plus,
   Square,
   Trash2,
-  Video,
   Volume2,
 } from 'lucide-react';
 import type {
   CurationStatus,
-  HoldridgeZoneId,
   IucnCategory,
   PhotoTag,
   SightingEntry,
@@ -21,10 +19,7 @@ import type {
   UserSession,
 } from '../types/cbls';
 import {
-  detectHoldridgeZoneByElevation,
-  estimateCblsElevationFromCoords,
   getHoldridgeZoneInfo,
-  HOLDRIDGE_ZONES,
   playBioacousticPreview,
   TAXON_GROUPS,
 } from '../utils/ecology';
@@ -48,10 +43,7 @@ interface CatalogModuleProps {
   onRequestUserSession: () => void;
   onSelectSpecies: (id: string) => void;
   onClearCreateMode: () => void;
-  onSaveSpecies: (
-    record: SpeciesRecord,
-    initialCount?: number,
-  ) => void;
+  onSaveSpecies: (record: SpeciesRecord) => void;
   onDeleteSpecies: (id: string) => void;
   onQuickSighting: (speciesId: string) => void;
 }
@@ -85,6 +77,7 @@ function createEmptySpeciesDraft(nextIndex: number, user: UserSession | null): S
     iucn: 'LC',
     medicalAlert: false,
     curationStatus: 'Borrador local',
+    isSample: true,
     photoUrl: '',
     videoUrl: '',
     photoTag: 'Vista general',
@@ -95,11 +88,6 @@ function createEmptySpeciesDraft(nextIndex: number, user: UserSession | null): S
       pulsePattern: 'pulse',
       notes: 'No aplica (Sin canto).',
     },
-    latitude: 9.584,
-    longitude: -83.912,
-    elevationM: 2150,
-    locality: 'Sector Copey de Dota, CBLS',
-    holdridgeZone: 'bp-MB',
     activityCycle: 'Diurna',
     ecology: {
       chromaticsAnatomy: '',
@@ -138,8 +126,6 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
       ? createEmptySpeciesDraft(species.length + 1, currentUser)
       : activeSpecies,
   );
-  const [initialCount, setInitialCount] = useState<number>(1);
-  const [gpsNotice, setGpsNotice] = useState<string | null>(null);
 
   // Admin PIN Protection states
   const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
@@ -177,49 +163,6 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     (sum, s) => sum + s.individualCount,
     0,
   );
-
-  const handleCaptureGps = () => {
-    setGpsNotice('Consultando coordenadas WGS84...');
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const lat = Number(pos.coords.latitude.toFixed(5));
-          const lon = Number(pos.coords.longitude.toFixed(5));
-          const alt = pos.coords.altitude
-            ? Math.round(pos.coords.altitude)
-            : estimateCblsElevationFromCoords(lat, lon);
-          const autoZone = detectHoldridgeZoneByElevation(alt);
-          setDraft((prev) => ({
-            ...prev,
-            latitude: lat,
-            longitude: lon,
-            elevationM: alt,
-            holdridgeZone: autoZone,
-          }));
-          setGpsNotice(
-            `GPS fijado: ${lat}° N, ${lon}° W · ${alt} m s.n.m. (${autoZone})`,
-          );
-        },
-        () => {
-          const lat = 9.5518;
-          const lon = -83.8062;
-          const alt = 2380;
-          const autoZone = detectHoldridgeZoneByElevation(alt);
-          setDraft((prev) => ({
-            ...prev,
-            latitude: lat,
-            longitude: lon,
-            elevationM: alt,
-            holdridgeZone: autoZone,
-          }));
-          setGpsNotice(
-            `Referencia estación CBLS aplicada: ${lat}° N, ${lon}° W · ${alt} m s.n.m.`,
-          );
-        },
-        { timeout: 3500 },
-      );
-    }
-  };
 
   const handlePlayCall = (target: SpeciesRecord) => {
     if (isPlayingCall && stopAudio) {
@@ -315,15 +258,18 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
       return;
     }
 
-    onSaveSpecies(
-      {
-        ...draft,
-        scientificName: draft.scientificName.trim(),
-        commonName: draft.commonName.trim(),
-        creatorName: draft.creatorName || currentUser.observerName,
-      },
-      mode === 'create' ? initialCount : undefined,
-    );
+    onSaveSpecies({
+      ...draft,
+      isSample: true,
+      latitude: undefined,
+      longitude: undefined,
+      elevationM: undefined,
+      locality: undefined,
+      holdridgeZone: undefined,
+      scientificName: draft.scientificName.trim(),
+      commonName: draft.commonName.trim(),
+      creatorName: draft.creatorName || currentUser.observerName,
+    });
     onSelectSpecies(draft.id);
     setMode('view');
   };
@@ -378,6 +324,9 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
             ) : (
               species.map((sp) => {
                 const isSelected = mode !== 'create' && activeSpecies?.id === sp.id;
+                const spSightingCount = sightings.filter(
+                  (o) => o.speciesId === sp.id,
+                ).length;
                 return (
                   <button
                     key={sp.id}
@@ -398,6 +347,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                           {sp.catalogCode}
                         </span>
                         <span className="text-muted">·</span>
+                        <span className="font-mono text-primary">Muestra</span>
+                        <span className="text-muted">·</span>
                         <span className="text-muted">{sp.taxon}</span>
                         {['CR', 'EN', 'VU'].includes(sp.iucn) || sp.medicalAlert ? (
                           <>
@@ -416,7 +367,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       </p>
                     </div>
                     <span className="shrink-0 font-mono text-xs text-muted">
-                      {sp.elevationM} m
+                      {spSightingCount} avist.
                     </span>
                   </button>
                 );
@@ -446,17 +397,21 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
               <div className="flex flex-col justify-between space-y-4 p-5 md:col-span-6">
                 <div>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs text-muted">
                       <span className="font-mono text-secondary">
                         {activeSpecies.catalogCode}
+                      </span>
+                      {' · '}
+                      <span className="font-semibold text-primary">
+                        Especie de muestra
                       </span>
                       {' · '}
                       <span>{activeSpecies.taxon}</span>
                       {' · '}
                       <span>{activeSpecies.curationStatus}</span>
                     </p>
-                    <span className="inline-flex items-center gap-1 text-[11px] text-muted border border-border px-2 py-0.5 rounded">
+                    <span className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-muted">
                       <Lock className="h-3 w-3 text-secondary" />
                       {currentUser?.isAdmin ? 'Acceso Administrador' : 'Edición restringida'}
                     </span>
@@ -493,25 +448,34 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   </p>
                 </div>
 
-                <div className="space-y-2 border-t border-border pt-3 font-mono text-xs text-muted">
-                  <p>
-                    WGS84: {activeSpecies.latitude.toFixed(4)}° N,{' '}
-                    {activeSpecies.longitude.toFixed(4)}° W ·{' '}
-                    {activeSpecies.elevationM} m s.n.m.
+                <div className="space-y-2 border-t border-border pt-3 text-xs text-muted">
+                  <p className="font-semibold text-primary">
+                    Ficha de referencia (Especie de muestra)
                   </p>
-                  <p className="font-sans text-xs text-foreground">
-                    Zona Holdridge:{' '}
-                    <span className="text-secondary">
-                      {getHoldridgeZoneInfo(activeSpecies.holdridgeZone).name}
-                    </span>
-                  </p>
-                  <p className="font-sans text-xs text-muted">
-                    Localidad tipo CBLS: {activeSpecies.locality} ·{' '}
-                    {speciesSightings.length} avist. ({speciesTotalIndividuals}{' '}
-                    ind.)
-                  </p>
+                  {speciesSightings.length > 0 ? (
+                    <>
+                      <p className="font-mono text-foreground/90">
+                        Último avistamiento: {speciesSightings[0].latitude.toFixed(6)}° N,{' '}
+                        {speciesSightings[0].longitude.toFixed(6)}° W ·{' '}
+                        {speciesSightings[0].elevationM} m s.n.m.
+                      </p>
+                      <p className="text-foreground">
+                        Localidad registrada: {speciesSightings[0].locality} ·{' '}
+                        <span className="text-secondary">
+                          {getHoldridgeZoneInfo(speciesSightings[0].holdridgeZone).shortName}
+                        </span>
+                      </p>
+                      <p>
+                        Total en campo: {speciesSightings.length} avist. ({speciesTotalIndividuals} ind.)
+                      </p>
+                    </>
+                  ) : (
+                    <p className="leading-relaxed">
+                      Sin ubicación inicial asignada. Las coordenadas y localidades aparecerán únicamente cuando registres avistamientos en campo para esta especie.
+                    </p>
+                  )}
                   {activeSpecies.creatorName && (
-                    <p className="font-sans text-xs text-secondary">
+                    <p className="text-secondary">
                       Catalogado por: {activeSpecies.creatorName}
                     </p>
                   )}
@@ -715,11 +679,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
               <div>
                 <h2 className="text-xl font-semibold text-foreground">
                   {mode === 'create'
-                    ? 'Registrar nueva especie manualmente (desde 0)'
-                    : `Editar ficha: ${draft.commonName}`}
+                    ? 'Agregar especie de muestra (sin ubicación inicial)'
+                    : `Editar especie de muestra: ${draft.commonName}`}
                 </h2>
                 <p className="text-xs text-muted">
-                  Ingresa binomio, enlaces de fotos/videos/audios por URL y descriptores ecológicos
+                  La ficha se guarda solo como muestra en la colección para ir registrando sus avistamientos posteriormente.
                 </p>
               </div>
               {species.length > 0 && activeSpecies && (
@@ -879,24 +843,6 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     </label>
                   </div>
                 </div>
-
-                {mode === 'create' && (
-                  <div className="border-t border-border pt-4">
-                    <Field
-                      label="Individuos observados en el hallazgo inicial (Opcional)"
-                      htmlFor="sp-init-count"
-                    >
-                      <StepperInput
-                        id="sp-init-count"
-                        value={initialCount}
-                        min={0}
-                        max={200}
-                        unit="ind."
-                        onChange={setInitialCount}
-                      />
-                    </Field>
-                  </div>
-                )}
               </div>
 
               {/* Block 2: Multimedia por URL (Fotos, Videos, Audios) */}
@@ -1103,117 +1049,20 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 </Field>
               </div>
 
-              {/* Block 4: GPS & Holdridge Life Zone */}
-              <div className="space-y-4 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-base font-semibold text-foreground">
-                      Ubicación geográfica y Zona de Vida Holdridge
+              {/* Block 4: Sample-Only Notice (No initial location stored on species) */}
+              <div className="p-5">
+                <div className="flex items-start gap-3 rounded-lg border border-primary/25 bg-[#05140E] p-4">
+                  <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Especie de muestra (sin ubicación de avistamiento predeterminada)
                     </h3>
-                    <p className="text-xs text-muted">
-                      Al ingresar la altitud se sugiere automáticamente la Zona Holdridge
+                    <p className="text-xs leading-relaxed text-muted">
+                      Al guardar esta ficha quedará disponible en{' '}
+                      <strong className="text-foreground">Colección</strong> y en el selector de{' '}
+                      <strong className="text-foreground">Avistamientos</strong>. No se asigna dónde se ve ni coordenadas hasta que registres avistamientos reales en campo o desde el Mapa SIG.
                     </p>
                   </div>
-                  <Button tone="secondary" onClick={handleCaptureGps}>
-                    <Compass className="h-4 w-4" />
-                    Capturar GPS
-                  </Button>
-                </div>
-
-                {gpsNotice && (
-                  <p role="status" className="font-mono text-xs text-secondary">
-                    {gpsNotice}
-                  </p>
-                )}
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <Field label="Latitud WGS84 (°N)" htmlFor="sp-lat">
-                    <input
-                      id="sp-lat"
-                      type="number"
-                      step="0.0001"
-                      value={draft.latitude}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (!Number.isNaN(v)) {
-                          setDraft((p) => ({ ...p, latitude: v }));
-                        }
-                      }}
-                      className={`${inputClassName} font-mono tabular-nums`}
-                    />
-                  </Field>
-
-                  <Field label="Longitud WGS84 (°W)" htmlFor="sp-lon">
-                    <input
-                      id="sp-lon"
-                      type="number"
-                      step="0.0001"
-                      value={draft.longitude}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (!Number.isNaN(v)) {
-                          setDraft((p) => ({ ...p, longitude: v }));
-                        }
-                      }}
-                      className={`${inputClassName} font-mono tabular-nums`}
-                    />
-                  </Field>
-
-                  <Field label="Elevación (m s.n.m.)" htmlFor="sp-elev">
-                    <StepperInput
-                      id="sp-elev"
-                      value={draft.elevationM}
-                      min={400}
-                      max={3500}
-                      step={25}
-                      unit="m"
-                      onChange={(alt) =>
-                        setDraft((p) => ({
-                          ...p,
-                          elevationM: alt,
-                          holdridgeZone: detectHoldridgeZoneByElevation(alt),
-                        }))
-                      }
-                    />
-                  </Field>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field
-                    label="Zona de Vida Holdridge"
-                    htmlFor="sp-zone"
-                  >
-                    <select
-                      id="sp-zone"
-                      value={draft.holdridgeZone}
-                      onChange={(e) =>
-                        setDraft((p) => ({
-                          ...p,
-                          holdridgeZone: e.target.value as HoldridgeZoneId,
-                        }))
-                      }
-                      className={inputClassName}
-                    >
-                      {HOLDRIDGE_ZONES.map((z) => (
-                        <option key={z.id} value={z.id}>
-                          {z.name} ({z.minElevation}–{z.maxElevation} m)
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-
-                  <Field label="Localidad específica CBLS" htmlFor="sp-loc">
-                    <input
-                      id="sp-loc"
-                      type="text"
-                      required
-                      value={draft.locality}
-                      onChange={(e) =>
-                        setDraft((p) => ({ ...p, locality: e.target.value }))
-                      }
-                      className={inputClassName}
-                    />
-                  </Field>
                 </div>
               </div>
 

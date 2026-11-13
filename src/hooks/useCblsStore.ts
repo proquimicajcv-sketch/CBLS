@@ -235,13 +235,14 @@ export function useCblsStore() {
 
   // Upsert Species (IndexedDB + State + Name-only Change Log)
   const upsertSpecies = useCallback(
-    async (record: SpeciesRecord, initialCount?: number) => {
+    async (record: SpeciesRecord) => {
       const exists = species.some((s) => s.id === record.id);
       const { creatorCode: _omitCreatorCode, ...restRecord } = record;
       void _omitCreatorCode;
 
       const updatedRecord: SpeciesRecord = {
         ...restRecord,
+        isSample: restRecord.isSample ?? true,
         creatorName: restRecord.creatorName || userSession?.observerName,
         updatedAt: new Date().toISOString(),
         synced: false,
@@ -255,53 +256,16 @@ export function useCblsStore() {
             : [updatedRecord, ...prev],
         );
 
-        // If an initial observation count was provided
-        if (initialCount && initialCount > 0 && userSession) {
-          const now = new Date();
-          const yyyy = now.getFullYear();
-          const mm = String(now.getMonth() + 1).padStart(2, '0');
-          const dd = String(now.getDate()).padStart(2, '0');
-          const hh = String(now.getHours()).padStart(2, '0');
-          const min = String(now.getMinutes()).padStart(2, '0');
-
-          const newSighting: SightingEntry = {
-            id: `obs-${Date.now()}`,
-            occurrenceId: `urn:catalog:CBLS:${yyyy}:OBS-${Date.now().toString().slice(-4)}`,
-            speciesId: updatedRecord.id,
-            individualCount: initialCount,
-            observedDate: `${yyyy}-${mm}-${dd}`,
-            observedTime: `${hh}:${min}`,
-            observer: userSession.observerName,
-            latitude: updatedRecord.latitude,
-            longitude: updatedRecord.longitude,
-            elevationM: updatedRecord.elevationM,
-            locality: updatedRecord.locality,
-            holdridgeZone: updatedRecord.holdridgeZone,
-            microhabitat: 'Registro primario al catalogar la especie',
-            weatherCondition: 'Neblina montana',
-            photoUrl: updatedRecord.photoUrl || undefined,
-            videoUrl: updatedRecord.videoUrl || undefined,
-            audioUrl: updatedRecord.bioacoustics.audioUrl || undefined,
-            synced: false,
-            createdAt: now.toISOString(),
-          };
-
-          await idbSaveSighting(newSighting);
-          setSightings((prev) => [newSighting, ...prev]);
-        }
-
         await appendChangeLog(
           exists ? 'Editó especie' : 'Creó especie',
           `${updatedRecord.commonName} (${updatedRecord.catalogCode})`,
-          initialCount && initialCount > 0
-            ? `Registro inicial: ${initialCount} ind. · ${updatedRecord.locality}`
-            : updatedRecord.locality,
+          'Especie de muestra en colección',
         );
 
         setLastSavedIso(new Date().toISOString());
-        notifyMutation(`Especie guardada: ${updatedRecord.commonName}`);
+        notifyMutation(`Especie de muestra guardada: ${updatedRecord.commonName}`);
         setStatusMessage(
-          `Especie guardada en IndexedDB: ${updatedRecord.commonName} (${updatedRecord.catalogCode})`,
+          `Especie de muestra guardada en colección: ${updatedRecord.commonName} (${updatedRecord.catalogCode})`,
         );
       } catch (err) {
         console.error('Error al guardar especie:', err);
