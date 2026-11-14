@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeLogAction,
   ChangeLogEntry,
@@ -9,20 +9,63 @@ import type {
 } from '../types/cbls';
 import { computeDatasetChecksum, validateAccessCode } from '../utils/ecology';
 import {
-  idbClearAll,
   idbDeleteSpecies,
   idbGetAllChangeLogs,
   idbGetAllSightings,
   idbGetAllSpecies,
   idbGetAllSyncLogs,
+  idbReplaceAll,
   idbSaveChangeLog,
   idbSaveSighting,
   idbSaveSpecies,
-  idbSaveSyncLog,
 } from '../utils/indexedDb';
 
 const BROADCAST_CHANNEL_NAME = 'bitacora_cbls_sync_channel';
 const SESSION_STORAGE_KEY = 'cbls_active_observer_session';
+const OFFLINE_OUTBOX_KEY = 'cbls_offline_outbox_v2';
+
+interface ServerDatasetState {
+  version: number;
+  species: SpeciesRecord[];
+  sightings: SightingEntry[];
+  syncLogs: SyncBatchLog[];
+  changeLogs: ChangeLogEntry[];
+  updatedAt: string;
+}
+
+interface OfflineOutbox {
+  speciesUpserts: SpeciesRecord[];
+  speciesDeletes: string[];
+  sightingAdds: SightingEntry[];
+}
+
+function readOfflineOutbox(): OfflineOutbox {
+  try {
+    const raw = localStorage.getItem(OFFLINE_OUTBOX_KEY);
+    if (!raw) return { speciesUpserts: [], speciesDeletes: [], sightingAdds: [] };
+    const parsed = JSON.parse(raw) as Partial<OfflineOutbox>;
+    return {
+      speciesUpserts: Array.isArray(parsed.speciesUpserts) ? parsed.speciesUpserts : [],
+      speciesDeletes: Array.isArray(parsed.speciesDeletes) ? parsed.speciesDeletes : [],
+      sightingAdds: Array.isArray(parsed.sightingAdds) ? parsed.sightingAdds : [],
+    };
+  } catch {
+    return { speciesUpserts: [], speciesDeletes: [], sightingAdds: [] };
+  }
+}
+
+function writeOfflineOutbox(outbox: OfflineOutbox) {
+  try {
+    localStorage.setItem(OFFLINE_OUTBOX_KEY, JSON.stringify(outbox));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function getWsUrl(): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/ws/cbls`;
+}
 
 export function useCblsStore() {
   const [species, setSpecies] = useState<SpeciesRecord[]>([]);
@@ -33,11 +76,11 @@ export function useCblsStore() {
   const [browserOnline, setBrowserOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true,
   );
+  const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [lastSavedIso, setLastSavedIso] = useState<string>(() => new Date().toISOString());
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
 
-  // User session state: Observer Name + validated access code (fixed 5 codes or admin 5531)
   const [userSession, setUserSession] = useState<UserSession | null>(() => {
     try {
       const saved = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -61,7 +104,50 @@ export function useCblsStore() {
     return null;
   });
 
-  // Reload data from IndexedDB
+  const userSessionRef = useRef(userSession);
+  userSessionRef.current = userSession;
+
+  const offlineAutonomousRef = useRef(offlineAutonomousMode);
+  offlineAutonomousRef.current = offlineAutonomousMode;
+
+  const browserOnlineRef = useRef(browserOnline);
+  browserOnlineRef.current = browserOnline;
+
+  // Apply authoritative server snapshot to React state + IndexedDB
+  const applyFullServerState = useCallback(async (serverState: ServerDatasetState) => {
+    const cleanSightings = (serverState.sightings || []).filter(
+      (s) => s.microhabitat !== 'Registro primario al catalogar la especie',
+    );
+    const cleanSpecies = (serverState.species || []).map((sp) => ({
+      ...sp,
+      isSample: true,
+      latitude: undefined,
+      longitude: undefined,
+      elevationM: undefined,
+      locality: undefined,
+      holdridgeZone: undefined,
+      synced: true,
+    }));
+
+    setSpecies(cleanSpecies);
+    setSightings(cleanSightings);
+    setSyncLogs(serverState.syncLogs || []);
+    setChangeLogs(serverState.changeLogs || []);
+    setLastSavedIso(serverState.updatedAt || new Date().toISOString());
+
+    try {
+      await idbReplaceAll({
+        species: cleanSpecies,
+        sightings: cleanSightings,
+        syncLogs: serverState.syncLogs || [],
+        changeLogs: serverState.changeLogs || [],
+      });
+    } catch (err) {
+      console.error('Error al actualizar IndexedDB:', err);
+    }
+  }, []);
+
+  // Load initial local IndexedDB cache immediately while server state loads
   const reloadFromIdb = useCallback(async () => {
     try {
       const [spList, siList, logs, history] = await Promise.all([
@@ -70,8 +156,12 @@ export function useCblsStore() {
         idbGetAllSyncLogs(),
         idbGetAllChangeLogs(),
       ]);
+      // Strip legacy auto-sightings from older browser caches
+      const cleanSi = siList.filter(
+        (s) => s.microhabitat !== 'Registro primario al catalogar la especie',
+      );
       setSpecies(spList);
-      setSightings(siList);
+      setSightings(cleanSi);
       setSyncLogs(logs);
       setChangeLogs(history);
     } catch (err) {
@@ -80,46 +170,78 @@ export function useCblsStore() {
     }
   }, []);
 
-  // BroadcastChannel for instant cross-tab / cross-device synchronization
-  useEffect(() => {
-    reloadFromIdb();
+  // Flush any genuine offline outbox changes to the server when back online
+  const flushOfflineOutbox = useCallback(async () => {
+    if (offlineAutonomousRef.current || !browserOnlineRef.current) return false;
+    const session = userSessionRef.current;
+    if (!session) return false;
 
-    const onOnline = () => setBrowserOnline(true);
-    const onOffline = () => setBrowserOnline(false);
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
-
-    let channel: BroadcastChannel | null = null;
-    if ('BroadcastChannel' in window) {
-      channel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-      channel.onmessage = (event) => {
-        if (event.data?.type === 'CBLS_DATA_MUTATED') {
-          reloadFromIdb();
-          setStatusMessage(
-            `Actualización en tiempo real recibida (${event.data.origin || 'otro dispositivo'}).`,
-          );
-        }
-      };
+    const outbox = readOfflineOutbox();
+    if (
+      outbox.speciesUpserts.length === 0 &&
+      outbox.speciesDeletes.length === 0 &&
+      outbox.sightingAdds.length === 0
+    ) {
+      return false;
     }
 
-    // Also listen to storage events as fallback
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'cbls_sync_ping') {
-        reloadFromIdb();
+    try {
+      // Process deletions first if admin
+      if (session.isAdmin) {
+        for (const delId of outbox.speciesDeletes) {
+          await fetch(`/api/cbls/species/${encodeURIComponent(delId)}`, {
+            method: 'DELETE',
+            headers: {
+              'x-cbls-code': session.observerCode,
+              'x-cbls-actor': session.observerName,
+            },
+          });
+        }
       }
-    };
-    window.addEventListener('storage', handleStorageChange);
 
-    return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
-      window.removeEventListener('storage', handleStorageChange);
-      if (channel) channel.close();
-    };
-  }, [reloadFromIdb]);
+      const res = await fetch('/api/cbls/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-cbls-code': session.observerCode,
+          'x-cbls-actor': session.observerName,
+        },
+        body: JSON.stringify({
+          species: outbox.speciesUpserts,
+          sightings: outbox.sightingAdds,
+        }),
+      });
 
-  // Broadcast change helper
-  const notifyMutation = useCallback((actionDesc: string) => {
+      if (res.ok) {
+        const data = (await res.json()) as { ok: boolean; state?: ServerDatasetState };
+        writeOfflineOutbox({ speciesUpserts: [], speciesDeletes: [], sightingAdds: [] });
+        if (data.state) {
+          await applyFullServerState(data.state);
+        }
+        return true;
+      }
+    } catch {
+      // keep outbox for next reconnect
+    }
+    return false;
+  }, [applyFullServerState]);
+
+  // Fetch authoritative state over HTTP
+  const fetchServerState = useCallback(async () => {
+    if (offlineAutonomousRef.current) return;
+    try {
+      await flushOfflineOutbox();
+      const res = await fetch('/api/cbls/state', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = (await res.json()) as ServerDatasetState;
+      await applyFullServerState(data);
+    } catch {
+      // Offline fallback remains active in IndexedDB
+    }
+  }, [applyFullServerState, flushOfflineOutbox]);
+
+  // BroadcastChannel for instant same-browser-profile tab sync (fallback when offline)
+  const notifySameBrowserTabs = useCallback((actionDesc: string) => {
     try {
       if ('BroadcastChannel' in window) {
         const channel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
@@ -131,14 +253,209 @@ export function useCblsStore() {
         });
         channel.close();
       }
-      localStorage.setItem('cbls_sync_ping', String(Date.now()));
     } catch {
       // ignore
     }
   }, []);
 
-  // Append name-only change log entry (never stores access codes)
-  const appendChangeLog = useCallback(
+  // Real-time WebSocket + HTTP state recovery + online/offline listeners
+  useEffect(() => {
+    let active = true;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+
+    reloadFromIdb().then(() => {
+      if (active) fetchServerState();
+    });
+
+    const connectWebSocket = () => {
+      if (!active || offlineAutonomousRef.current || !browserOnlineRef.current) {
+        setWsConnected(false);
+        return;
+      }
+
+      try {
+        ws = new WebSocket(getWsUrl());
+
+        ws.onopen = () => {
+          if (!active) return;
+          reconnectAttempt = 0;
+          setWsConnected(true);
+          flushOfflineOutbox();
+        };
+
+        ws.onmessage = async (event) => {
+          if (!active) return;
+          try {
+            const msg = JSON.parse(event.data);
+
+            if (msg.type === 'state:init' && msg.state) {
+              await applyFullServerState(msg.state as ServerDatasetState);
+              return;
+            }
+
+            if (msg.type === 'state:replaced' && msg.state) {
+              await applyFullServerState(msg.state as ServerDatasetState);
+              setStatusMessage(
+                msg.reason === 'reset'
+                  ? 'Base de datos reiniciada a 0 en todos los dispositivos.'
+                  : 'Inventario sincronizado en tiempo real en todos los dispositivos.',
+              );
+              return;
+            }
+
+            if (msg.type === 'species:upserted' && msg.species) {
+              const incomingSp = {
+                ...(msg.species as SpeciesRecord),
+                isSample: true,
+                synced: true,
+              };
+              setSpecies((prev) => {
+                const exists = prev.some((s) => s.id === incomingSp.id);
+                return exists
+                  ? prev.map((s) => (s.id === incomingSp.id ? incomingSp : s))
+                  : [incomingSp, ...prev];
+              });
+              await idbSaveSpecies(incomingSp);
+
+              if (msg.changeLog) {
+                const log = msg.changeLog as ChangeLogEntry;
+                setChangeLogs((prev) =>
+                  prev.some((c) => c.id === log.id) ? prev : [log, ...prev],
+                );
+                await idbSaveChangeLog(log);
+              }
+              setLastSavedIso(msg.updatedAt || new Date().toISOString());
+              setStatusMessage(
+                `Actualización en vivo: especie "${incomingSp.commonName}" disponible en todos los dispositivos.`,
+              );
+              return;
+            }
+
+            if (msg.type === 'species:deleted' && msg.speciesId) {
+              const deletedId = String(msg.speciesId);
+              setSpecies((prev) => prev.filter((s) => s.id !== deletedId));
+              setSightings((prev) => prev.filter((o) => o.speciesId !== deletedId));
+              await idbDeleteSpecies(deletedId);
+
+              if (msg.changeLog) {
+                const log = msg.changeLog as ChangeLogEntry;
+                setChangeLogs((prev) =>
+                  prev.some((c) => c.id === log.id) ? prev : [log, ...prev],
+                );
+                await idbSaveChangeLog(log);
+              }
+              setLastSavedIso(msg.updatedAt || new Date().toISOString());
+              setStatusMessage('Actualización en vivo: ficha eliminada del inventario.');
+              return;
+            }
+
+            if (msg.type === 'sighting:added' && msg.sighting) {
+              const incomingSi = {
+                ...(msg.sighting as SightingEntry),
+                synced: true,
+              };
+              setSightings((prev) =>
+                prev.some((o) => o.id === incomingSi.id)
+                  ? prev.map((o) => (o.id === incomingSi.id ? incomingSi : o))
+                  : [incomingSi, ...prev],
+              );
+              await idbSaveSighting(incomingSi);
+
+              if (msg.changeLog) {
+                const log = msg.changeLog as ChangeLogEntry;
+                setChangeLogs((prev) =>
+                  prev.some((c) => c.id === log.id) ? prev : [log, ...prev],
+                );
+                await idbSaveChangeLog(log);
+              }
+              setLastSavedIso(msg.updatedAt || new Date().toISOString());
+              setStatusMessage(
+                `Avistamiento en vivo registrado por ${incomingSi.observer}.`,
+              );
+            }
+          } catch {
+            // ignore malformed frame
+          }
+        };
+
+        ws.onclose = () => {
+          if (!active) return;
+          setWsConnected(false);
+          if (!offlineAutonomousRef.current && browserOnlineRef.current) {
+            const delayMs = Math.min(10000, 1000 * 2 ** Math.min(reconnectAttempt, 3));
+            reconnectAttempt += 1;
+            reconnectTimer = window.setTimeout(connectWebSocket, delayMs);
+          }
+        };
+
+        ws.onerror = () => {
+          ws?.close();
+        };
+      } catch {
+        setWsConnected(false);
+      }
+    };
+
+    connectWebSocket();
+
+    const onOnline = () => {
+      setBrowserOnline(true);
+      browserOnlineRef.current = true;
+      fetchServerState();
+      if (!ws || ws.readyState === WebSocket.CLOSED) {
+        connectWebSocket();
+      }
+    };
+
+    const onOffline = () => {
+      setBrowserOnline(false);
+      browserOnlineRef.current = false;
+      setWsConnected(false);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && browserOnlineRef.current) {
+        fetchServerState();
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+          connectWebSocket();
+        }
+      }
+    };
+
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    let channel: BroadcastChannel | null = null;
+    if ('BroadcastChannel' in window) {
+      channel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+      channel.onmessage = (event) => {
+        if (event.data?.type === 'CBLS_DATA_MUTATED') {
+          reloadFromIdb();
+        }
+      };
+    }
+
+    return () => {
+      active = false;
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      if (ws) ws.close();
+      if (channel) channel.close();
+    };
+  }, [
+    offlineAutonomousMode,
+    reloadFromIdb,
+    fetchServerState,
+    flushOfflineOutbox,
+    applyFullServerState,
+  ]);
+
+  const appendLocalChangeLog = useCallback(
     async (
       action: ChangeLogAction,
       target: string,
@@ -198,9 +515,12 @@ export function useCblsStore() {
   const effectiveOffline = offlineAutonomousMode || !browserOnline;
 
   const pendingSyncCount = useMemo(() => {
-    const unsyncedSpecies = species.filter((s) => !s.synced).length;
-    const unsyncedSightings = sightings.filter((o) => !o.synced).length;
-    return unsyncedSpecies + unsyncedSightings;
+    const outbox = readOfflineOutbox();
+    const outboxCount =
+      outbox.speciesUpserts.length + outbox.speciesDeletes.length + outbox.sightingAdds.length;
+    const unsyncedLocal =
+      species.filter((s) => !s.synced).length + sightings.filter((o) => !o.synced).length;
+    return Math.max(outboxCount, unsyncedLocal);
   }, [species, sightings]);
 
   const totalIndividuals = useMemo(
@@ -227,81 +547,192 @@ export function useCblsStore() {
       setStatusMessage(
         next
           ? 'Modo Campo Autónomo activado: Datos guardados en IndexedDB de forma local sin requerir conexión.'
-          : 'Enlace de red habilitado para el dispositivo.',
+          : 'Enlace en tiempo real reactivado para sincronizar con todos los dispositivos.',
       );
       return next;
     });
   }, []);
 
-  // Upsert Species (IndexedDB + State + Name-only Change Log)
+  // Upsert sample species (Requires Admin code; publishes immediately to all devices via server + WS)
   const upsertSpecies = useCallback(
-    async (record: SpeciesRecord) => {
+    async (record: SpeciesRecord, overrideAdminCode?: string): Promise<boolean> => {
+      const authCode = overrideAdminCode || userSession?.observerCode || '';
+      const authCheck = validateAccessCode(authCode);
+      if (!authCheck.isAdmin) {
+        setStorageError('Se requiere clave de administrador para agregar o editar especies.');
+        return false;
+      }
+
       const exists = species.some((s) => s.id === record.id);
       const { creatorCode: _omitCreatorCode, ...restRecord } = record;
       void _omitCreatorCode;
 
       const updatedRecord: SpeciesRecord = {
         ...restRecord,
-        isSample: restRecord.isSample ?? true,
-        creatorName: restRecord.creatorName || userSession?.observerName,
+        isSample: true,
+        latitude: undefined,
+        longitude: undefined,
+        elevationM: undefined,
+        locality: undefined,
+        holdridgeZone: undefined,
+        creatorName: restRecord.creatorName || userSession?.observerName || 'Administrador',
         updatedAt: new Date().toISOString(),
-        synced: false,
+        synced: !effectiveOffline,
       };
 
+      // Persist optimistically to IndexedDB & React state
       try {
         await idbSaveSpecies(updatedRecord);
         setSpecies((prev) =>
           exists
-            ? prev.map((s) => (s.id === record.id ? updatedRecord : s))
+            ? prev.map((s) => (s.id === updatedRecord.id ? updatedRecord : s))
             : [updatedRecord, ...prev],
         );
-
-        await appendChangeLog(
-          exists ? 'Editó especie' : 'Creó especie',
-          `${updatedRecord.commonName} (${updatedRecord.catalogCode})`,
-          'Especie de muestra en colección',
-        );
-
-        setLastSavedIso(new Date().toISOString());
-        notifyMutation(`Especie de muestra guardada: ${updatedRecord.commonName}`);
-        setStatusMessage(
-          `Especie de muestra guardada en colección: ${updatedRecord.commonName} (${updatedRecord.catalogCode})`,
-        );
+        setLastSavedIso(updatedRecord.updatedAt);
+        setStorageError(null);
       } catch (err) {
-        console.error('Error al guardar especie:', err);
+        console.error('Error al guardar en IndexedDB:', err);
         setStorageError('No se pudo escribir en IndexedDB.');
+        return false;
       }
+
+      if (!effectiveOffline) {
+        try {
+          const res = await fetch('/api/cbls/species', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-cbls-code': authCheck.normalized,
+              'x-cbls-actor': userSession?.observerName || updatedRecord.creatorName || 'Administrador',
+            },
+            body: JSON.stringify({ species: updatedRecord }),
+          });
+
+          if (res.ok) {
+            const data = (await res.json()) as {
+              ok: boolean;
+              species: SpeciesRecord;
+              changeLog?: ChangeLogEntry;
+            };
+            const syncedRecord = { ...data.species, isSample: true, synced: true };
+            await idbSaveSpecies(syncedRecord);
+            setSpecies((prev) =>
+              prev.map((s) => (s.id === syncedRecord.id ? syncedRecord : s)),
+            );
+            if (data.changeLog) {
+              await idbSaveChangeLog(data.changeLog);
+              setChangeLogs((prev) =>
+                prev.some((c) => c.id === data.changeLog!.id)
+                  ? prev
+                  : [data.changeLog!, ...prev],
+              );
+            }
+            notifySameBrowserTabs(`Especie guardada: ${syncedRecord.commonName}`);
+            setStatusMessage(
+              `Especie de muestra publicada en tiempo real en todos los dispositivos: ${syncedRecord.commonName}`,
+            );
+            return true;
+          }
+
+          if (res.status === 403) {
+            await reloadFromIdb();
+            setStorageError('Código de administrador rechazado por el servidor.');
+            return false;
+          }
+        } catch {
+          // Network unreachable -> fall through to offline outbox queue
+        }
+      }
+
+      // Queue in offline outbox
+      const outbox = readOfflineOutbox();
+      outbox.speciesUpserts = [
+        updatedRecord,
+        ...outbox.speciesUpserts.filter((s) => s.id !== updatedRecord.id),
+      ];
+      writeOfflineOutbox(outbox);
+      await appendLocalChangeLog(
+        exists ? 'Editó especie' : 'Creó especie',
+        `${updatedRecord.commonName} (${updatedRecord.catalogCode})`,
+        'Especie de muestra (pendiente de enlace)',
+      );
+      notifySameBrowserTabs(`Especie guardada offline: ${updatedRecord.commonName}`);
+      setStatusMessage(
+        `Especie de muestra guardada offline: ${updatedRecord.commonName}. Se sincronizará automáticamente al recuperar conexión.`,
+      );
+      return true;
     },
-    [species, userSession, appendChangeLog, notifyMutation],
+    [species, userSession, effectiveOffline, appendLocalChangeLog, notifySameBrowserTabs, reloadFromIdb],
   );
 
-  // Delete Species
+  // Delete Species (Requires Admin code; removes across all connected devices)
   const deleteSpecies = useCallback(
-    async (speciesId: string) => {
-      try {
-        const targetSp = species.find((s) => s.id === speciesId);
-        const targetLabel = targetSp
-          ? `${targetSp.commonName} (${targetSp.catalogCode})`
-          : speciesId;
+    async (speciesId: string, overrideAdminCode?: string) => {
+      const authCode = overrideAdminCode || userSession?.observerCode || '';
+      const authCheck = validateAccessCode(authCode);
+      if (!authCheck.isAdmin) {
+        setStorageError('Se requiere clave de administrador para eliminar especies.');
+        return;
+      }
 
+      const targetSp = species.find((s) => s.id === speciesId);
+      const targetLabel = targetSp
+        ? `${targetSp.commonName} (${targetSp.catalogCode})`
+        : speciesId;
+
+      try {
         await idbDeleteSpecies(speciesId);
         setSpecies((prev) => prev.filter((s) => s.id !== speciesId));
         setSightings((prev) => prev.filter((o) => o.speciesId !== speciesId));
-
-        await appendChangeLog('Eliminó especie', targetLabel);
-
         setLastSavedIso(new Date().toISOString());
-        notifyMutation(`Especie eliminada: ${targetLabel}`);
-        setStatusMessage('Especie eliminada del registro local.');
       } catch (err) {
-        console.error('Error al eliminar especie:', err);
+        console.error('Error al eliminar de IndexedDB:', err);
         setStorageError('No se pudo eliminar de IndexedDB.');
+        return;
       }
+
+      if (!effectiveOffline) {
+        try {
+          const res = await fetch(`/api/cbls/species/${encodeURIComponent(speciesId)}`, {
+            method: 'DELETE',
+            headers: {
+              'x-cbls-code': authCheck.normalized,
+              'x-cbls-actor': userSession?.observerName || 'Administrador',
+            },
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { changeLog?: ChangeLogEntry };
+            if (data.changeLog) {
+              await idbSaveChangeLog(data.changeLog);
+              setChangeLogs((prev) =>
+                prev.some((c) => c.id === data.changeLog!.id)
+                  ? prev
+                  : [data.changeLog!, ...prev],
+              );
+            }
+            notifySameBrowserTabs(`Especie eliminada: ${targetLabel}`);
+            setStatusMessage('Especie eliminada en tiempo real en todos los dispositivos.');
+            return;
+          }
+        } catch {
+          // fall through to offline outbox
+        }
+      }
+
+      const outbox = readOfflineOutbox();
+      outbox.speciesUpserts = outbox.speciesUpserts.filter((s) => s.id !== speciesId);
+      if (!outbox.speciesDeletes.includes(speciesId)) {
+        outbox.speciesDeletes.push(speciesId);
+      }
+      writeOfflineOutbox(outbox);
+      await appendLocalChangeLog('Eliminó especie', targetLabel);
+      notifySameBrowserTabs(`Especie eliminada offline: ${targetLabel}`);
+      setStatusMessage('Especie eliminada localmente (pendiente de sincronización).');
     },
-    [species, appendChangeLog, notifyMutation],
+    [species, userSession, effectiveOffline, appendLocalChangeLog, notifySameBrowserTabs],
   );
 
-  // Add Sighting
+  // Add Sighting (Requires valid field or admin code; broadcasts immediately to all devices)
   const addSighting = useCallback(
     async (entry: Omit<SightingEntry, 'id' | 'occurrenceId' | 'synced' | 'createdAt'>) => {
       const now = new Date();
@@ -311,35 +742,79 @@ export function useCblsStore() {
 
       const newSighting: SightingEntry = {
         ...cleanEntry,
-        id: `obs-${Date.now()}`,
+        id: `obs-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
         occurrenceId: `urn:catalog:CBLS:${year}:OBS-${Date.now().toString().slice(-4)}`,
-        synced: false,
+        synced: !effectiveOffline,
         createdAt: now.toISOString(),
       };
 
+      const sp = species.find((s) => s.id === cleanEntry.speciesId);
+
       try {
-        const sp = species.find((s) => s.id === cleanEntry.speciesId);
         await idbSaveSighting(newSighting);
         setSightings((prev) => [newSighting, ...prev]);
-
-        await appendChangeLog(
-          'Registró avistamiento',
-          sp ? `${sp.commonName} (${sp.catalogCode})` : 'Especie registrada',
-          `${cleanEntry.individualCount} ind. · ${cleanEntry.locality}`,
-          cleanEntry.observer,
-        );
-
         setLastSavedIso(now.toISOString());
-        notifyMutation(`Nuevo avistamiento por ${cleanEntry.observer}`);
-        setStatusMessage(
-          `Avistamiento registrado por ${cleanEntry.observer}: ${cleanEntry.individualCount} ind.`,
-        );
       } catch (err) {
-        console.error('Error al guardar avistamiento:', err);
+        console.error('Error al guardar avistamiento en IndexedDB:', err);
         setStorageError('Error al guardar en IndexedDB.');
+        return;
       }
+
+      if (!effectiveOffline && userSession?.observerCode) {
+        try {
+          const res = await fetch('/api/cbls/sightings', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-cbls-code': userSession.observerCode,
+              'x-cbls-actor': cleanEntry.observer || userSession.observerName,
+            },
+            body: JSON.stringify({ sighting: newSighting }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as {
+              sighting: SightingEntry;
+              changeLog?: ChangeLogEntry;
+            };
+            const syncedSi = { ...data.sighting, synced: true };
+            await idbSaveSighting(syncedSi);
+            setSightings((prev) =>
+              prev.map((o) => (o.id === syncedSi.id ? syncedSi : o)),
+            );
+            if (data.changeLog) {
+              await idbSaveChangeLog(data.changeLog);
+              setChangeLogs((prev) =>
+                prev.some((c) => c.id === data.changeLog!.id)
+                  ? prev
+                  : [data.changeLog!, ...prev],
+              );
+            }
+            notifySameBrowserTabs(`Nuevo avistamiento por ${cleanEntry.observer}`);
+            setStatusMessage(
+              `Avistamiento publicado en tiempo real por ${cleanEntry.observer}: ${cleanEntry.individualCount} ind.`,
+            );
+            return;
+          }
+        } catch {
+          // fall through to offline outbox
+        }
+      }
+
+      const outbox = readOfflineOutbox();
+      outbox.sightingAdds.unshift(newSighting);
+      writeOfflineOutbox(outbox);
+      await appendLocalChangeLog(
+        'Registró avistamiento',
+        sp ? `${sp.commonName} (${sp.catalogCode})` : 'Especie registrada',
+        `${cleanEntry.individualCount} ind. · ${cleanEntry.locality}`,
+        cleanEntry.observer,
+      );
+      notifySameBrowserTabs(`Avistamiento offline por ${cleanEntry.observer}`);
+      setStatusMessage(
+        `Avistamiento guardado en dispositivo por ${cleanEntry.observer}: ${cleanEntry.individualCount} ind.`,
+      );
     },
-    [species, appendChangeLog, notifyMutation],
+    [species, userSession, effectiveOffline, appendLocalChangeLog, notifySameBrowserTabs],
   );
 
   // Manual Sync trigger
@@ -349,56 +824,63 @@ export function useCblsStore() {
       return;
     }
 
+    if (!userSession) {
+      setStatusMessage('Identifícate primero con tu nombre y código para sincronizar.');
+      return;
+    }
+
     try {
-      const updatedSpecies = species.map((s) => ({ ...s, synced: true }));
-      const updatedSightings = sightings.map((o) => ({ ...o, synced: true }));
+      const outbox = readOfflineOutbox();
+      const pendingSpecies = [
+        ...outbox.speciesUpserts,
+        ...species.filter((s) => !s.synced),
+      ];
+      const pendingSightings = [
+        ...outbox.sightingAdds,
+        ...sightings.filter((o) => !o.synced),
+      ];
 
-      await Promise.all([
-        ...updatedSpecies.map((s) => idbSaveSpecies(s)),
-        ...updatedSightings.map((o) => idbSaveSighting(o)),
-      ]);
+      const res = await fetch('/api/cbls/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-cbls-code': userSession.observerCode,
+          'x-cbls-actor': userSession.observerName,
+        },
+        body: JSON.stringify({
+          species: pendingSpecies,
+          sightings: pendingSightings,
+        }),
+      });
 
-      setSpecies(updatedSpecies);
-      setSightings(updatedSightings);
+      if (!res.ok) {
+        setStatusMessage('No se pudo completar la sincronización con el servidor.');
+        return;
+      }
 
-      const hash = computeDatasetChecksum(updatedSpecies, updatedSightings);
-      const actorName = userSession?.observerName || 'Dispositivo local';
-      const logEntry: SyncBatchLog = {
-        batchHash: hash,
-        timestamp: new Date().toLocaleString(),
-        recordsSynced: pendingSyncCount,
-        deviceProfile: actorName,
-      };
-
-      await idbSaveSyncLog(logEntry);
-      setSyncLogs((prev) => [logEntry, ...prev]);
-
-      await appendChangeLog(
-        'Sincronizó lote',
-        `Lote #${hash}`,
-        `${pendingSyncCount} registros sincronizados`,
-        actorName,
-      );
-
-      notifyMutation('Sincronización completada');
-      setStatusMessage(`Sincronización completada (#${hash}).`);
+      const data = (await res.json()) as { state?: ServerDatasetState };
+      writeOfflineOutbox({ speciesUpserts: [], speciesDeletes: [], sightingAdds: [] });
+      if (data.state) {
+        await applyFullServerState(data.state);
+      }
+      notifySameBrowserTabs('Sincronización completada');
+      setStatusMessage('Todos los dispositivos quedaron sincronizados con el servidor.');
     } catch (err) {
       console.error('Error al sincronizar:', err);
-      setStorageError('Error durante la sincronización.');
+      setStorageError('No se pudo conectar con el servidor para sincronizar.');
     }
   }, [
     offlineAutonomousMode,
+    userSession,
     species,
     sightings,
-    pendingSyncCount,
-    userSession,
-    appendChangeLog,
-    notifyMutation,
+    applyFullServerState,
+    notifySameBrowserTabs,
   ]);
 
-  // JSON Import
+  // JSON Import (syncs across all connected devices via server)
   const importBackupJson = useCallback(
-    async (jsonText: string): Promise<boolean> => {
+    async (jsonText: string, overrideAdminCode?: string): Promise<boolean> => {
       try {
         const parsed = JSON.parse(jsonText);
         if (!parsed || !Array.isArray(parsed.species) || !Array.isArray(parsed.sightings)) {
@@ -406,34 +888,51 @@ export function useCblsStore() {
           return false;
         }
 
-        await idbClearAll();
+        const authCode = overrideAdminCode || userSession?.observerCode || '';
+        const authCheck = validateAccessCode(authCode);
 
-        for (const sp of parsed.species) {
-          await idbSaveSpecies(sp);
-        }
-        for (const si of parsed.sightings) {
-          await idbSaveSighting(si);
-        }
-        if (Array.isArray(parsed.syncLogs)) {
-          for (const l of parsed.syncLogs) {
-            await idbSaveSyncLog(l);
+        if (!effectiveOffline && authCheck.isAdmin) {
+          const res = await fetch('/api/cbls/import', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-cbls-code': authCheck.normalized,
+              'x-cbls-actor': userSession?.observerName || 'Administrador',
+            },
+            body: JSON.stringify(parsed),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { state?: ServerDatasetState };
+            writeOfflineOutbox({ speciesUpserts: [], speciesDeletes: [], sightingAdds: [] });
+            if (data.state) {
+              await applyFullServerState(data.state);
+            }
+            setStatusMessage(
+              `Respaldo importado y propagado en tiempo real: ${parsed.species.length} especies.`,
+            );
+            return true;
           }
         }
-        if (Array.isArray(parsed.changeLogs)) {
-          for (const chg of parsed.changeLogs) {
-            await idbSaveChangeLog(chg);
-          }
+
+        if (!authCheck.isAdmin) {
+          setStatusMessage('Solo un administrador autorizado puede importar respaldos.');
+          return false;
         }
 
-        await appendChangeLog(
+        await idbReplaceAll({
+          species: parsed.species,
+          sightings: parsed.sightings,
+          syncLogs: Array.isArray(parsed.syncLogs) ? parsed.syncLogs : [],
+          changeLogs: Array.isArray(parsed.changeLogs) ? parsed.changeLogs : [],
+        });
+        await appendLocalChangeLog(
           'Importó respaldo',
           `${parsed.species.length} especies · ${parsed.sightings.length} avistamientos`,
         );
-
         await reloadFromIdb();
-        notifyMutation('Respaldo JSON importado');
+        notifySameBrowserTabs('Respaldo JSON importado');
         setStatusMessage(
-          `Respaldo importado: ${parsed.species.length} especies, ${parsed.sightings.length} avistamientos.`,
+          `Respaldo importado localmente: ${parsed.species.length} especies.`,
         );
         return true;
       } catch (err) {
@@ -442,23 +941,67 @@ export function useCblsStore() {
         return false;
       }
     },
-    [reloadFromIdb, appendChangeLog, notifyMutation],
+    [
+      userSession,
+      effectiveOffline,
+      applyFullServerState,
+      appendLocalChangeLog,
+      reloadFromIdb,
+      notifySameBrowserTabs,
+    ],
   );
 
-  const resetAllDataToZero = useCallback(async () => {
-    try {
-      await idbClearAll();
-      setSpecies([]);
-      setSightings([]);
-      setSyncLogs([]);
-      setChangeLogs([]);
-      await appendChangeLog('Reinició base', 'Inventario restablecido a 0');
-      notifyMutation('Base de datos restablecida a 0');
-      setStatusMessage('Sistema reiniciado con 0 especies y 0 avistamientos.');
-    } catch (err) {
-      console.error('Error al vaciar datos:', err);
-    }
-  }, [appendChangeLog, notifyMutation]);
+  // Reset all data to 0 across all devices
+  const resetAllDataToZero = useCallback(
+    async (overrideAdminCode?: string) => {
+      const authCode = overrideAdminCode || userSession?.observerCode || '';
+      const authCheck = validateAccessCode(authCode);
+      if (!authCheck.isAdmin) {
+        setStorageError('Se requiere clave de administrador para reiniciar la base a 0.');
+        return;
+      }
+
+      try {
+        writeOfflineOutbox({ speciesUpserts: [], speciesDeletes: [], sightingAdds: [] });
+        if (!effectiveOffline) {
+          const res = await fetch('/api/cbls/reset', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-cbls-code': authCheck.normalized,
+              'x-cbls-actor': userSession?.observerName || 'Administrador',
+            },
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { state?: ServerDatasetState };
+            if (data.state) {
+              await applyFullServerState(data.state);
+            }
+            setStatusMessage('Sistema reiniciado a 0 en todos los dispositivos conectados.');
+            return;
+          }
+        }
+
+        await idbReplaceAll({ species: [], sightings: [], syncLogs: [], changeLogs: [] });
+        setSpecies([]);
+        setSightings([]);
+        setSyncLogs([]);
+        setChangeLogs([]);
+        await appendLocalChangeLog('Reinició base', 'Inventario restablecido a 0');
+        notifySameBrowserTabs('Base de datos restablecida a 0');
+        setStatusMessage('Sistema reiniciado con 0 especies y 0 avistamientos.');
+      } catch (err) {
+        console.error('Error al vaciar datos:', err);
+      }
+    },
+    [
+      userSession,
+      effectiveOffline,
+      applyFullServerState,
+      appendLocalChangeLog,
+      notifySameBrowserTabs,
+    ],
+  );
 
   const exportBackupObject = useCallback(
     () => ({
@@ -484,6 +1027,7 @@ export function useCblsStore() {
     saveUserSession,
     offlineAutonomousMode,
     effectiveOffline,
+    wsConnected,
     lastSavedIso,
     pendingSyncCount,
     totalIndividuals,
@@ -491,7 +1035,10 @@ export function useCblsStore() {
     storageBytes,
     storageError,
     statusMessage,
-    clearStatusMessage: () => setStatusMessage(null),
+    clearStatusMessage: () => {
+      setStatusMessage(null);
+      setStorageError(null);
+    },
     toggleAutonomousMode,
     upsertSpecies,
     addSighting,

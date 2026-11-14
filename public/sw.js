@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bitacora-cbls-v1';
+const CACHE_NAME = 'bitacora-cbls-v2';
 
 const STATIC_PRECACHE = [
   '/',
@@ -33,6 +33,11 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
+
+  // Never cache real-time API or WebSocket endpoints
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws/')) {
+    return;
+  }
 
   if (url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com') {
     event.respondWith(

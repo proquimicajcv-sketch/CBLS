@@ -82,11 +82,18 @@ export interface SpeciesRecord {
   creatorCode?: string;
 }
 
+export type SightingObservationMethod =
+  | 'En persona'
+  | 'Cámara trampa'
+  | 'Reporte de tercero';
+
 export interface SightingEntry {
   id: string;
   occurrenceId: string;
   speciesId: string;
   individualCount: number;
+  observationMethod?: SightingObservationMethod;
+  sourceDetail?: string;
   observedDate: string;
   observedTime: string;
   observer: string;

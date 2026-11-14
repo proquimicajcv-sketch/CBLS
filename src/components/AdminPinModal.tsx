@@ -7,7 +7,7 @@ interface AdminPinModalProps {
   open: boolean;
   title: string;
   actionDescription: string;
-  onSuccess: () => void;
+  onSuccess: (verifiedPin: string) => void;
   onClose: () => void;
 }
 
@@ -25,10 +25,11 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin.trim() === ADMIN_PIN) {
+    const cleaned = pin.trim();
+    if (cleaned === ADMIN_PIN) {
       setError(false);
       setPin('');
-      onSuccess();
+      onSuccess(cleaned);
     } else {
       setError(true);
     }

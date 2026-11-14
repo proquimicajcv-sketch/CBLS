@@ -1,6 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Camera, Compass, Headphones, MapPin, Video, X } from 'lucide-react';
-import type { HoldridgeZoneId, SightingEntry, SpeciesRecord, UserSession } from '../types/cbls';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Camera, Compass, Eye, Headphones, MapPin, Search, Users, Video, X } from 'lucide-react';
+import type {
+  HoldridgeZoneId,
+  SightingEntry,
+  SightingObservationMethod,
+  SpeciesRecord,
+  UserSession,
+} from '../types/cbls';
 import {
   detectHoldridgeZoneByElevation,
   estimateCblsElevationFromCoords,
@@ -41,7 +47,11 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     speciesList.find((s) => s.id === initialSpeciesId) ?? speciesList[0];
 
   const [speciesId, setSpeciesId] = useState<string>(defaultSp?.id ?? '');
+  const [speciesSearch, setSpeciesSearch] = useState<string>('');
   const [individualCount, setIndividualCount] = useState<number>(1);
+  const [observationMethod, setObservationMethod] =
+    useState<SightingObservationMethod>('En persona');
+  const [sourceDetail, setSourceDetail] = useState<string>('');
   const [observedDate, setObservedDate] = useState<string>(() => {
     const d = new Date();
     return d.toISOString().slice(0, 10);
@@ -79,8 +89,25 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
 
+  const sortedFilteredSpecies = useMemo(() => {
+    const q = speciesSearch.trim().toLowerCase();
+    const sorted = [...speciesList].sort((a, b) =>
+      a.commonName.localeCompare(b.commonName, 'es'),
+    );
+    if (!q) return sorted;
+    return sorted.filter(
+      (sp) =>
+        sp.commonName.toLowerCase().includes(q) ||
+        sp.scientificName.toLowerCase().includes(q) ||
+        sp.catalogCode.toLowerCase().includes(q),
+    );
+  }, [speciesList, speciesSearch]);
+
   useEffect(() => {
     if (!open) return;
+    setSpeciesSearch('');
+    setObservationMethod('En persona');
+    setSourceDetail('');
     const sp = speciesList.find((s) => s.id === initialSpeciesId) ?? speciesList[0];
     if (sp) {
       setSpeciesId(sp.id);
@@ -159,6 +186,8 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     onSave({
       speciesId,
       individualCount,
+      observationMethod,
+      sourceDetail: sourceDetail.trim() || undefined,
       observedDate,
       observedTime,
       observer: currentUser.observerName,
@@ -220,6 +249,29 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Especie observada" htmlFor="obs-species" className="sm:col-span-2">
+              {speciesList.length > 8 && (
+                <div className="relative mb-2">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+                  <input
+                    type="search"
+                    placeholder="Buscar especie entre la lista de muestra..."
+                    value={speciesSearch}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSpeciesSearch(val);
+                      const q = val.trim().toLowerCase();
+                      const firstMatch = speciesList.find(
+                        (sp) =>
+                          sp.commonName.toLowerCase().includes(q) ||
+                          sp.scientificName.toLowerCase().includes(q) ||
+                          sp.catalogCode.toLowerCase().includes(q),
+                      );
+                      if (firstMatch) setSpeciesId(firstMatch.id);
+                    }}
+                    className={`${inputClassName} min-h-9 pl-9 text-xs`}
+                  />
+                </div>
+              )}
               <select
                 id="obs-species"
                 autoFocus
@@ -227,16 +279,114 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                 onChange={(e) => setSpeciesId(e.target.value)}
                 className={inputClassName}
               >
-                {speciesList.length === 0 && (
+                {speciesList.length === 0 ? (
                   <option value="">No hay especies catalogadas aún (agrega una primero)</option>
+                ) : sortedFilteredSpecies.length === 0 ? (
+                  <option value="">Sin coincidencias para &quot;{speciesSearch}&quot;</option>
+                ) : (
+                  sortedFilteredSpecies.map((sp) => (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.commonName} — {sp.scientificName} ({sp.catalogCode})
+                    </option>
+                  ))
                 )}
-                {speciesList.map((sp) => (
-                  <option key={sp.id} value={sp.id}>
-                    {sp.commonName} — {sp.scientificName} ({sp.catalogCode})
-                  </option>
-                ))}
               </select>
             </Field>
+
+            {/* Observation / Detection Method Selector */}
+            <div className="space-y-2.5 sm:col-span-2">
+              <span className="block text-xs font-medium text-foreground">
+                Forma de avistamiento / detección
+              </span>
+              <div
+                role="radiogroup"
+                aria-label="Forma de avistamiento"
+                className="grid grid-cols-1 gap-2 sm:grid-cols-3"
+              >
+                {(
+                  [
+                    {
+                      id: 'En persona' as const,
+                      label: 'En persona',
+                      desc: 'Avistamiento directo',
+                      icon: Eye,
+                    },
+                    {
+                      id: 'Cámara trampa' as const,
+                      label: 'Cámara trampa',
+                      desc: 'Fototrampeo',
+                      icon: Camera,
+                    },
+                    {
+                      id: 'Reporte de tercero' as const,
+                      label: 'Reporte externo',
+                      desc: 'Alguien dijo haberlo visto',
+                      icon: Users,
+                    },
+                  ] as const
+                ).map((opt) => {
+                  const Icon = opt.icon;
+                  const active = observationMethod === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setObservationMethod(opt.id)}
+                      className={`flex items-center gap-2.5 rounded-control border px-3 py-2.5 text-left transition-colors ${
+                        active
+                          ? 'border-primary bg-primary/15 text-foreground'
+                          : 'border-border bg-input text-muted hover:border-foreground/30 hover:text-foreground'
+                      }`}
+                    >
+                      <span
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+                          active
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-background text-muted'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-semibold text-foreground">
+                          {opt.label}
+                        </span>
+                        <span className="block truncate text-[11px] text-muted">
+                          {opt.desc}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {(observationMethod === 'Cámara trampa' ||
+                observationMethod === 'Reporte de tercero') && (
+                <Field
+                  label={
+                    observationMethod === 'Cámara trampa'
+                      ? 'Código o estación de cámara trampa (opcional)'
+                      : 'Persona o fuente que reportó el avistamiento (opcional)'
+                  }
+                  htmlFor="obs-source-detail"
+                >
+                  <input
+                    id="obs-source-detail"
+                    type="text"
+                    placeholder={
+                      observationMethod === 'Cámara trampa'
+                        ? 'Ej. Cámara Trampa CT-04 · Paso del Río'
+                        : 'Ej. Vecino de la finca / Guía local'
+                    }
+                    value={sourceDetail}
+                    onChange={(e) => setSourceDetail(e.target.value)}
+                    className={inputClassName}
+                  />
+                </Field>
+              )}
+            </div>
 
             <Field label="Individuos contabilizados" hint="Conteo directo" htmlFor="obs-count">
               <StepperInput

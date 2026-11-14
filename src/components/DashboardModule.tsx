@@ -37,6 +37,7 @@ interface DashboardModuleProps {
   totalIndividuals: number;
   currentUser: UserSession | null;
   effectiveOffline: boolean;
+  wsConnected: boolean;
   pendingSyncCount: number;
   checksum: string;
   pwaInstallSlot?: React.ReactNode;
@@ -54,6 +55,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   totalIndividuals,
   currentUser,
   effectiveOffline,
+  wsConnected,
   pendingSyncCount,
   checksum,
   pwaInstallSlot,
@@ -187,13 +189,19 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                   <span
                     aria-hidden="true"
                     className={`h-2 w-2 rounded-full ${
-                      effectiveOffline ? 'bg-coral' : 'bg-[#6EE7B7]'
+                      effectiveOffline
+                        ? 'bg-coral'
+                        : wsConnected
+                          ? 'bg-[#6EE7B7]'
+                          : 'bg-amber-300'
                     }`}
                   />
                   <span>
                     {effectiveOffline
                       ? 'Modo Offline Autónomo'
-                      : 'En vivo · Colaboración Activa'}
+                      : wsConnected
+                        ? 'En vivo · Tiempo real activo'
+                        : 'Enlazando dispositivos...'}
                   </span>
                 </button>
 
@@ -546,8 +554,16 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                             ({sp?.scientificName ?? 'Indet.'})
                           </span>
                         </p>
-                        <div className="mt-1 flex items-center gap-2 text-xs text-muted">
-                          <span>{obs.weatherCondition}</span>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
+                          <span className="rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary">
+                            {obs.observationMethod || 'En persona'}
+                          </span>
+                          {obs.sourceDetail && (
+                            <span className="truncate max-w-[180px] text-foreground/80">
+                              {obs.sourceDetail}
+                            </span>
+                          )}
+                          <span>· {obs.weatherCondition}</span>
                           {obs.photoUrl && (
                             <Camera className="h-3 w-3 text-secondary" />
                           )}

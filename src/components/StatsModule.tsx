@@ -407,6 +407,7 @@ export const StatsModule: React.FC<StatsModuleProps> = ({
               <tr className="border-b border-border text-muted">
                 <th className="px-4 py-3 font-mono">dwc:occurrenceID</th>
                 <th className="px-4 py-3">Especie</th>
+                <th className="px-4 py-3">Detección</th>
                 <th className="px-4 py-3 font-mono">Conteo</th>
                 <th className="px-4 py-3">Localidad</th>
                 <th className="px-4 py-3">Observador</th>
@@ -416,7 +417,7 @@ export const StatsModule: React.FC<StatsModuleProps> = ({
             <tbody className="divide-y divide-border">
               {sightings.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-muted">
+                  <td colSpan={7} className="px-4 py-6 text-center text-muted">
                     No hay avistamientos registrados en la base de datos.
                   </td>
                 </tr>
@@ -429,6 +430,9 @@ export const StatsModule: React.FC<StatsModuleProps> = ({
                       <td className="px-4 py-3 font-mono text-muted">{obs.occurrenceId}</td>
                       <td className="px-4 py-3 italic text-foreground">
                         {sp?.scientificName || 'Indeterminado'}
+                      </td>
+                      <td className="px-4 py-3 text-secondary">
+                        {obs.observationMethod || 'En persona'}
                       </td>
                       <td className="px-4 py-3 font-mono text-primary font-semibold">
                         {obs.individualCount} ind.

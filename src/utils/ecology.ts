@@ -144,6 +144,7 @@ export function generateDarwinCoreCsv(
   const headers = [
     'occurrenceID',
     'basisOfRecord',
+    'samplingProtocol',
     'catalogNumber',
     'scientificName',
     'vernacularName',
@@ -176,9 +177,16 @@ export function generateDarwinCoreCsv(
     const sp = speciesMap.get(sighting.speciesId);
     const zone = getHoldridgeZoneInfo(sighting.holdridgeZone);
     const media = [sighting.photoUrl, sighting.videoUrl, sighting.audioUrl].filter(Boolean).join(' | ');
+    const method = sighting.observationMethod || 'En persona';
+    const protocol = sighting.sourceDetail
+      ? `${method} (${sighting.sourceDetail})`
+      : method;
+    const basis = method === 'Cámara trampa' ? 'MachineObservation' : 'HumanObservation';
+
     return [
       sighting.occurrenceId,
-      'HumanObservation',
+      basis,
+      protocol,
       sp?.catalogCode ?? 'CBLS-UNASSIGNED',
       sp?.scientificName ?? 'Indeterminado',
       sp?.commonName ?? 'Sin nombre común',

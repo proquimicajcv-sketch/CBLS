@@ -33,6 +33,7 @@ interface BackupModuleProps {
   onRequestUserSession: () => void;
   offlineAutonomousMode: boolean;
   effectiveOffline: boolean;
+  wsConnected: boolean;
   lastSavedIso: string;
   pendingSyncCount: number;
   checksum: string;
@@ -40,8 +41,8 @@ interface BackupModuleProps {
   onToggleAutonomousMode: () => void;
   onSyncNow: () => void;
   onExportObject: () => Record<string, unknown>;
-  onImportJson: (jsonText: string) => Promise<boolean>;
-  onResetAllDataToZero: () => void;
+  onImportJson: (jsonText: string, overrideAdminCode?: string) => Promise<boolean>;
+  onResetAllDataToZero: (overrideAdminCode?: string) => void;
 }
 
 export const BackupModule: React.FC<BackupModuleProps> = ({
@@ -53,6 +54,7 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
   onRequestUserSession,
   offlineAutonomousMode,
   effectiveOffline,
+  wsConnected,
   lastSavedIso,
   pendingSyncCount,
   checksum,
@@ -113,10 +115,10 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
       <AdminPinModal
         open={adminPinModalOpen}
         title="Autorizar Reinicio de Base de Datos"
-        actionDescription="Esta acción vaciará por completo la base de datos local IndexedDB y reiniciará todos los contadores a 0"
-        onSuccess={() => {
+        actionDescription="Esta acción vaciará por completo la base de datos compartida e IndexedDB y reiniciará todos los contadores a 0 en todos los dispositivos"
+        onSuccess={(verifiedPin) => {
           setAdminPinModalOpen(false);
-          onResetAllDataToZero();
+          onResetAllDataToZero(verifiedPin);
         }}
         onClose={() => setAdminPinModalOpen(false)}
       />
@@ -159,11 +161,13 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
               <h2 className="text-lg font-semibold text-foreground">
                 {effectiveOffline
                   ? 'Modo Campo Offline Autónomo Activo'
-                  : 'Persistencia IndexedDB + Sincronización en Tiempo Real'}
+                  : wsConnected
+                    ? 'Sincronización en Tiempo Real Activa (Todos los dispositivos)'
+                    : 'Reconectando enlace en tiempo real con el servidor...'}
               </h2>
             </div>
             <p className="text-xs text-muted">
-              Motor de persistencia local en <strong>IndexedDB</strong> con actualización simultánea en dispositivos mediante canal en tiempo real.
+              Motor híbrido: caché local en <strong>IndexedDB</strong> y transmisión inmediata por <strong>WebSocket</strong> entre dispositivos.
             </p>
           </div>
 

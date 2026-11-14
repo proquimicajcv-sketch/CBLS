@@ -144,8 +144,11 @@ const SightingAdvancedMarker: React.FC<SightingMarkerProps> = ({
             <p className="text-[11px] text-slate-700">
               {sighting.elevationM} m s.n.m. · {sighting.individualCount} ind.
             </p>
+            <p className="text-[11px] font-semibold text-slate-800">
+              Método: {sighting.observationMethod || 'En persona'}
+            </p>
             <p className="text-[11px] font-medium text-emerald-800">
-              Observador: {sighting.observer}
+              Registró: {sighting.observer}
             </p>
           </div>
         </InfoWindow>
@@ -749,6 +752,15 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
                     <span className="text-secondary">
                       {getHoldridgeZoneInfo(activeSighting.holdridgeZone).name}
                     </span>
+                  </p>
+                  <p>
+                    <span className="text-muted">Método de detección:</span>{' '}
+                    <span className="font-medium text-primary">
+                      {activeSighting.observationMethod || 'En persona'}
+                    </span>
+                    {activeSighting.sourceDetail ? (
+                      <span className="text-muted"> · {activeSighting.sourceDetail}</span>
+                    ) : null}
                   </p>
                   <p>
                     <span className="text-muted">Conteo:</span>{' '}

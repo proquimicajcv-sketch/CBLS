@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Edit3,
   FilePlus2,
   Lock,
   MapPin,
   Plus,
+  Search,
   Square,
   Trash2,
   Volume2,
@@ -43,8 +44,8 @@ interface CatalogModuleProps {
   onRequestUserSession: () => void;
   onSelectSpecies: (id: string) => void;
   onClearCreateMode: () => void;
-  onSaveSpecies: (record: SpeciesRecord) => void;
-  onDeleteSpecies: (id: string) => void;
+  onSaveSpecies: (record: SpeciesRecord, overrideAdminCode?: string) => Promise<boolean> | void;
+  onDeleteSpecies: (id: string, overrideAdminCode?: string) => Promise<void> | void;
   onQuickSighting: (speciesId: string) => void;
 }
 
@@ -66,6 +67,18 @@ const IUCN_OPTIONS: { code: IucnCategory; label: string }[] = [
   { code: 'EN', label: 'EN — En peligro' },
   { code: 'CR', label: 'CR — En peligro crítico' },
 ];
+
+function getNextCatalogIndex(speciesList: SpeciesRecord[]): number {
+  let maxNum = speciesList.length;
+  for (const sp of speciesList) {
+    const match = sp.catalogCode.match(/(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (Number.isFinite(n) && n > maxNum) maxNum = n;
+    }
+  }
+  return maxNum + 1;
+}
 
 function createEmptySpeciesDraft(nextIndex: number, user: UserSession | null): SpeciesRecord {
   return {
@@ -123,25 +136,39 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   );
   const [draft, setDraft] = useState<SpeciesRecord>(() =>
     startInCreateMode || !activeSpecies
-      ? createEmptySpeciesDraft(species.length + 1, currentUser)
+      ? createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser)
       : activeSpecies,
   );
+  const [listQuery, setListQuery] = useState<string>('');
 
   // Admin PIN Protection states
   const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
-  const [pendingAdminAction, setPendingAdminAction] = useState<'edit' | 'delete' | null>(null);
+  const [pendingAdminAction, setPendingAdminAction] = useState<'save' | 'edit' | 'delete' | null>(null);
+  const [verifiedAdminPin, setVerifiedAdminPin] = useState<string | null>(null);
   const [confirmAdminDelete, setConfirmAdminDelete] = useState(false);
 
   const [isPlayingCall, setIsPlayingCall] = useState<boolean>(false);
   const [stopAudio, setStopAudio] = useState<(() => void) | null>(null);
 
+  const filteredListSpecies = useMemo(() => {
+    const q = listQuery.trim().toLowerCase();
+    if (!q) return species;
+    return species.filter(
+      (sp) =>
+        sp.commonName.toLowerCase().includes(q) ||
+        sp.scientificName.toLowerCase().includes(q) ||
+        sp.catalogCode.toLowerCase().includes(q) ||
+        sp.taxon.toLowerCase().includes(q),
+    );
+  }, [species, listQuery]);
+
   useEffect(() => {
     if (startInCreateMode || species.length === 0) {
       setMode('create');
-      setDraft(createEmptySpeciesDraft(species.length + 1, currentUser));
+      setDraft(createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser));
       onClearCreateMode();
     }
-  }, [startInCreateMode, species.length, currentUser, onClearCreateMode]);
+  }, [startInCreateMode, species, currentUser, onClearCreateMode]);
 
   useEffect(() => {
     if (mode === 'view' && activeSpecies) {
@@ -233,19 +260,41 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
   const executeAdminDelete = () => {
     if (!activeSpecies) return;
-    onDeleteSpecies(activeSpecies.id);
+    onDeleteSpecies(activeSpecies.id, verifiedAdminPin ?? undefined);
     setConfirmAdminDelete(false);
     setMode(species.length <= 1 ? 'create' : 'view');
   };
 
-  const handleAdminSuccess = () => {
+  const buildCleanSpeciesRecord = (): SpeciesRecord => ({
+    ...draft,
+    isSample: true,
+    latitude: undefined,
+    longitude: undefined,
+    elevationM: undefined,
+    locality: undefined,
+    holdridgeZone: undefined,
+    scientificName: draft.scientificName.trim(),
+    commonName: draft.commonName.trim(),
+    creatorName: draft.creatorName || currentUser?.observerName || 'Administrador',
+  });
+
+  const handleAdminSuccess = (pin: string) => {
+    setVerifiedAdminPin(pin);
     setAdminPinModalOpen(false);
     if (pendingAdminAction === 'edit' && activeSpecies) {
       setDraft(activeSpecies);
       setMode('edit');
     } else if (pendingAdminAction === 'delete' && activeSpecies) {
-      onDeleteSpecies(activeSpecies.id);
+      onDeleteSpecies(activeSpecies.id, pin);
       setMode(species.length <= 1 ? 'create' : 'view');
+    } else if (pendingAdminAction === 'save') {
+      const clean = buildCleanSpeciesRecord();
+      Promise.resolve(onSaveSpecies(clean, pin)).then((ok) => {
+        if (ok !== false) {
+          onSelectSpecies(clean.id);
+          setMode('view');
+        }
+      });
     }
     setPendingAdminAction(null);
   };
@@ -258,20 +307,19 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
       return;
     }
 
-    onSaveSpecies({
-      ...draft,
-      isSample: true,
-      latitude: undefined,
-      longitude: undefined,
-      elevationM: undefined,
-      locality: undefined,
-      holdridgeZone: undefined,
-      scientificName: draft.scientificName.trim(),
-      commonName: draft.commonName.trim(),
-      creatorName: draft.creatorName || currentUser.observerName,
+    if (!currentUser.isAdmin && !verifiedAdminPin) {
+      setPendingAdminAction('save');
+      setAdminPinModalOpen(true);
+      return;
+    }
+
+    const clean = buildCleanSpeciesRecord();
+    Promise.resolve(onSaveSpecies(clean, verifiedAdminPin ?? undefined)).then((ok) => {
+      if (ok !== false) {
+        onSelectSpecies(clean.id);
+        setMode('view');
+      }
     });
-    onSelectSpecies(draft.id);
-    setMode('view');
   };
 
   return (
@@ -279,11 +327,19 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
       {/* Admin PIN Authentication Modal */}
       <AdminPinModal
         open={adminPinModalOpen}
-        title={pendingAdminAction === 'delete' ? 'Autorizar Eliminación de Especie' : 'Autorizar Edición de Especie'}
+        title={
+          pendingAdminAction === 'delete'
+            ? 'Autorizar Eliminación de Especie'
+            : pendingAdminAction === 'save'
+              ? 'Autorizar Alta de Especie de Muestra'
+              : 'Autorizar Edición de Especie'
+        }
         actionDescription={
           pendingAdminAction === 'delete'
             ? `Estás a punto de eliminar permanentemente la ficha de ${activeSpecies?.commonName || 'la especie'}`
-            : `Estás a punto de modificar los datos científicos de ${activeSpecies?.commonName || 'la especie'}`
+            : pendingAdminAction === 'save'
+              ? `Solo el código de administrador autorizado puede agregar y sincronizar especies de muestra en todos los dispositivos`
+              : `Estás a punto de modificar los datos científicos de ${activeSpecies?.commonName || 'la especie'}`
         }
         onSuccess={handleAdminSuccess}
         onClose={() => {
@@ -307,7 +363,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
             <Button
               tone="primary"
               onClick={() => {
-                setDraft(createEmptySpeciesDraft(species.length + 1, currentUser));
+                setDraft(createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser));
                 setMode('create');
               }}
             >
@@ -316,13 +372,32 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
             </Button>
           </div>
 
-          <div className="divide-y divide-border">
+          {species.length > 0 && (
+            <div className="p-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+                <input
+                  type="search"
+                  placeholder="Filtrar lista (nombre, código, taxón)..."
+                  value={listQuery}
+                  onChange={(e) => setListQuery(e.target.value)}
+                  className={`${inputClassName} min-h-9 pl-9 text-xs`}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="max-h-[58vh] divide-y divide-border overflow-y-auto">
             {species.length === 0 ? (
               <div className="p-6 text-center text-xs text-muted">
                 No hay especies en el inventario. Haz clic en &quot;Nueva especie&quot; para ingresar la primera.
               </div>
+            ) : filteredListSpecies.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted">
+                Sin coincidencias para &quot;{listQuery}&quot;.
+              </div>
             ) : (
-              species.map((sp) => {
+              filteredListSpecies.map((sp) => {
                 const isSelected = mode !== 'create' && activeSpecies?.id === sp.id;
                 const spSightingCount = sightings.filter(
                   (o) => o.speciesId === sp.id,
@@ -367,7 +442,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       </p>
                     </div>
                     <span className="shrink-0 font-mono text-xs text-muted">
-                      {spSightingCount} avist.
+                      {spSightingCount > 0 ? `${spSightingCount} avist.` : 'Solo muestra'}
                     </span>
                   </button>
                 );
@@ -455,7 +530,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   {speciesSightings.length > 0 ? (
                     <>
                       <p className="font-mono text-foreground/90">
-                        Último avistamiento: {speciesSightings[0].latitude.toFixed(6)}° N,{' '}
+                        Último avistamiento ({speciesSightings[0].observationMethod || 'En persona'}):{' '}
+                        {speciesSightings[0].latitude.toFixed(6)}° N,{' '}
                         {speciesSightings[0].longitude.toFixed(6)}° W ·{' '}
                         {speciesSightings[0].elevationM} m s.n.m.
                       </p>
@@ -465,13 +541,18 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                           {getHoldridgeZoneInfo(speciesSightings[0].holdridgeZone).shortName}
                         </span>
                       </p>
+                      {speciesSightings[0].sourceDetail && (
+                        <p className="text-muted">
+                          Fuente / cámara: {speciesSightings[0].sourceDetail}
+                        </p>
+                      )}
                       <p>
                         Total en campo: {speciesSightings.length} avist. ({speciesTotalIndividuals} ind.)
                       </p>
                     </>
                   ) : (
                     <p className="leading-relaxed">
-                      Sin ubicación inicial asignada. Las coordenadas y localidades aparecerán únicamente cuando registres avistamientos en campo para esta especie.
+                      Sin ubicación inicial asignada (0 avistamientos · 0 individuos). Las coordenadas y reportes aparecerán únicamente cuando registres avistamientos reales (en persona, cámara trampa o reporte externo).
                     </p>
                   )}
                   {activeSpecies.creatorName && (

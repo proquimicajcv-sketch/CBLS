@@ -341,6 +341,7 @@ export default function App() {
               totalIndividuals={store.totalIndividuals}
               currentUser={store.userSession}
               effectiveOffline={store.effectiveOffline}
+              wsConnected={store.wsConnected}
               pendingSyncCount={store.pendingSyncCount}
               checksum={store.checksum}
               pwaInstallSlot={<PWAInstallButton />}
@@ -406,6 +407,7 @@ export default function App() {
               onRequestUserSession={() => setUserSessionModalOpen(true)}
               offlineAutonomousMode={store.offlineAutonomousMode}
               effectiveOffline={store.effectiveOffline}
+              wsConnected={store.wsConnected}
               lastSavedIso={store.lastSavedIso}
               pendingSyncCount={store.pendingSyncCount}
               checksum={store.checksum}

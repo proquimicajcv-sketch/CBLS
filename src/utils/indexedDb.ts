@@ -189,3 +189,35 @@ export async function idbClearAll(): Promise<void> {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+export async function idbReplaceAll(data: {
+  species: SpeciesRecord[];
+  sightings: SightingEntry[];
+  syncLogs: SyncBatchLog[];
+  changeLogs: ChangeLogEntry[];
+}): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(
+      [STORE_SPECIES, STORE_SIGHTINGS, STORE_SYNCLOGS, STORE_CHANGELOGS],
+      'readwrite',
+    );
+    const spStore = tx.objectStore(STORE_SPECIES);
+    const siStore = tx.objectStore(STORE_SIGHTINGS);
+    const syStore = tx.objectStore(STORE_SYNCLOGS);
+    const chStore = tx.objectStore(STORE_CHANGELOGS);
+
+    spStore.clear();
+    siStore.clear();
+    syStore.clear();
+    chStore.clear();
+
+    data.species.forEach((sp) => spStore.put(sp));
+    data.sightings.forEach((si) => siStore.put(si));
+    data.syncLogs.forEach((sy) => syStore.put(sy));
+    data.changeLogs.forEach((ch) => chStore.put(ch));
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}

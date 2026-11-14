@@ -22,7 +22,7 @@ interface CollectionModuleProps {
   onOpenSpeciesDetail: (speciesId: string) => void;
   onQuickSighting: (speciesId: string) => void;
   onOpenNewSpecies: () => void;
-  onDeleteSpecies: (speciesId: string) => void;
+  onDeleteSpecies: (speciesId: string, overrideAdminCode?: string) => void;
 }
 
 export const CollectionModule: React.FC<CollectionModuleProps> = ({
@@ -106,9 +106,9 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
     setAdminPinModalOpen(true);
   };
 
-  const handleAdminSuccess = () => {
+  const handleAdminSuccess = (verifiedPin: string) => {
     if (speciesToDelete) {
-      onDeleteSpecies(speciesToDelete.id);
+      onDeleteSpecies(speciesToDelete.id, verifiedPin);
       setSpeciesToDelete(null);
     }
     setAdminPinModalOpen(false);
@@ -175,7 +175,7 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                     {count}
                   </span>
                   <span className="text-xs text-muted">
-                    esp. · {individuals} ind.
+                    {individuals > 0 ? `esp. · ${individuals} ind.` : 'esp. de muestra'}
                   </span>
                 </div>
 
@@ -343,13 +343,21 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
 
                 <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
                   <div className="font-mono text-xs">
-                    <span className="font-semibold text-primary">
-                      {stats.sightingsCount} avist.
-                    </span>
-                    <span className="text-muted">
-                      {' '}
-                      · {stats.individuals} ind.
-                    </span>
+                    {stats.sightingsCount > 0 ? (
+                      <>
+                        <span className="font-semibold text-primary">
+                          {stats.sightingsCount} avist.
+                        </span>
+                        <span className="text-muted">
+                          {' '}
+                          · {stats.individuals} ind.
+                        </span>
+                      </>
+                    ) : (
+                      <span className="font-semibold text-primary">
+                        Solo muestra
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5">
