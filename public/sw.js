@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bitacora-cbls-v2';
+const CACHE_NAME = 'bitacora-cbls-v3';
 
 const STATIC_PRECACHE = [
   '/',
@@ -34,8 +34,13 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
 
-  // Never cache real-time API or WebSocket endpoints
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws/')) {
+  // Never cache real-time API, WebSocket, or Firebase endpoints
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/ws/') ||
+    url.hostname.endsWith('firebaseio.com') ||
+    url.hostname.endsWith('firebaseapp.com')
+  ) {
     return;
   }
 

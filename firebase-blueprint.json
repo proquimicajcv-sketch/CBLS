@@ -1,0 +1,138 @@
+{
+  "entities": {
+    "Species": {
+      "title": "Species",
+      "description": "Especie de muestra catalogada en el Corredor Biológico Los Santos (sin ubicación inicial).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "catalogCode": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "scientificName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "commonName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "taxon": { "type": "string", "enum": ["Aves", "Anfibios", "Reptiles", "Mamíferos", "Plantas", "Insectos"] },
+        "iucn": { "type": "string", "enum": ["LC", "NT", "VU", "EN", "CR"] },
+        "medicalAlert": { "type": "boolean" },
+        "curationStatus": { "type": "string", "enum": ["Validado", "En revisión", "Borrador local"] },
+        "isSample": { "type": "boolean" },
+        "photoUrl": { "type": "string", "maxLength": 2000 },
+        "videoUrl": { "type": "string", "maxLength": 2000 },
+        "photoTag": { "type": "string", "maxLength": 64 },
+        "bioacoustics": { "type": "object" },
+        "activityCycle": { "type": "string", "enum": ["Diurna", "Nocturna", "Crepuscular", "Permanente (Flora)"] },
+        "ecology": { "type": "object" },
+        "featuredNote": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "synced": { "type": "boolean" },
+        "creatorName": { "type": "string", "maxLength": 120 }
+      },
+      "required": [
+        "id",
+        "catalogCode",
+        "scientificName",
+        "commonName",
+        "taxon",
+        "iucn",
+        "medicalAlert",
+        "curationStatus",
+        "isSample",
+        "photoUrl",
+        "photoTag",
+        "bioacoustics",
+        "activityCycle",
+        "ecology",
+        "updatedAt",
+        "synced"
+      ]
+    },
+    "Sighting": {
+      "title": "Sighting",
+      "description": "Avistamiento georreferenciado registrado en campo (en persona, cámara trampa o reporte externo).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "occurrenceId": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "speciesId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "individualCount": { "type": "integer" },
+        "observationMethod": { "type": "string", "enum": ["En persona", "Cámara trampa", "Reporte de tercero"] },
+        "sourceDetail": { "type": "string", "maxLength": 300 },
+        "observedDate": { "type": "string", "maxLength": 32 },
+        "observedTime": { "type": "string", "maxLength": 16 },
+        "observer": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "elevationM": { "type": "integer" },
+        "locality": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "holdridgeZone": { "type": "string", "enum": ["bmh-P", "bmh-MB", "bp-MB", "bp-M", "pp-SA"] },
+        "microhabitat": { "type": "string", "maxLength": 400 },
+        "weatherCondition": { "type": "string", "enum": ["Despejado", "Neblina montana", "Lluvia ligera", "Noche húmeda"] },
+        "photoUrl": { "type": "string", "maxLength": 2000 },
+        "videoUrl": { "type": "string", "maxLength": 2000 },
+        "audioUrl": { "type": "string", "maxLength": 2000 },
+        "synced": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": [
+        "id",
+        "occurrenceId",
+        "speciesId",
+        "individualCount",
+        "observedDate",
+        "observedTime",
+        "observer",
+        "latitude",
+        "longitude",
+        "elevationM",
+        "locality",
+        "holdridgeZone",
+        "microhabitat",
+        "weatherCondition",
+        "synced",
+        "createdAt"
+      ]
+    },
+    "ChangeLog": {
+      "title": "ChangeLog",
+      "description": "Registro cronológico de cambios (únicamente nombre de la persona).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "action": { "type": "string", "maxLength": 64 },
+        "target": { "type": "string", "maxLength": 240 },
+        "details": { "type": "string", "maxLength": 400 },
+        "timestamp": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "actorName", "action", "target", "timestamp"]
+    },
+    "SyncLog": {
+      "title": "SyncLog",
+      "description": "Historial de lotes sincronizados.",
+      "type": "object",
+      "properties": {
+        "batchHash": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "recordsSynced": { "type": "integer" },
+        "deviceProfile": { "type": "string", "maxLength": 120 }
+      },
+      "required": ["batchHash", "timestamp", "recordsSynced", "deviceProfile"]
+    }
+  },
+  "firestore": {
+    "/species/{speciesId}": {
+      "schema": { "$ref": "#/entities/Species" },
+      "description": "Colección de fichas biológicas de muestra sincronizadas en tiempo real entre todos los dispositivos."
+    },
+    "/sightings/{sightingId}": {
+      "schema": { "$ref": "#/entities/Sighting" },
+      "description": "Colección de avistamientos georreferenciados registrados en campo."
+    },
+    "/changelogs/{changeLogId}": {
+      "schema": { "$ref": "#/entities/ChangeLog" },
+      "description": "Historial de cambios por nombre de observador o administrador."
+    },
+    "/synclogs/{syncLogId}": {
+      "schema": { "$ref": "#/entities/SyncLog" },
+      "description": "Registro de lotes sincronizados."
+    }
+  }
+}

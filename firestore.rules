@@ -1,0 +1,283 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidBioacoustics(bio) {
+      return bio is map
+        && bio.keys().hasAll(['hasCall', 'notes'])
+        && bio.keys().hasOnly(['hasCall', 'audioUrl', 'dominantFreqKhz', 'pulsePattern', 'notes'])
+        && bio.hasCall is bool
+        && bio.notes is string && bio.notes.size() <= 2000
+        && (!('audioUrl' in bio) || (bio.audioUrl is string && bio.audioUrl.size() <= 2000))
+        && (!('dominantFreqKhz' in bio) || (bio.dominantFreqKhz is number && bio.dominantFreqKhz >= 0 && bio.dominantFreqKhz <= 50))
+        && (!('pulsePattern' in bio) || (bio.pulsePattern is string && bio.pulsePattern in ['flute', 'pulse', 'whistle', 'chirp']));
+    }
+
+    function isValidEcology(eco) {
+      return eco is map
+        && eco.keys().hasAll([
+          'chromaticsAnatomy',
+          'ethologyBehavior',
+          'courtshipReproduction',
+          'interIntraRelations',
+          'confirmedReferences'
+        ])
+        && eco.keys().hasOnly([
+          'chromaticsAnatomy',
+          'ethologyBehavior',
+          'courtshipReproduction',
+          'interIntraRelations',
+          'confirmedReferences'
+        ])
+        && eco.chromaticsAnatomy is string && eco.chromaticsAnatomy.size() <= 8000
+        && eco.ethologyBehavior is string && eco.ethologyBehavior.size() <= 8000
+        && eco.courtshipReproduction is string && eco.courtshipReproduction.size() <= 8000
+        && eco.interIntraRelations is string && eco.interIntraRelations.size() <= 8000
+        && eco.confirmedReferences is string && eco.confirmedReferences.size() <= 8000;
+    }
+
+    function isValidSpecies(data) {
+      return data.keys().hasAll([
+          'id',
+          'catalogCode',
+          'scientificName',
+          'commonName',
+          'taxon',
+          'iucn',
+          'medicalAlert',
+          'curationStatus',
+          'isSample',
+          'photoUrl',
+          'photoTag',
+          'bioacoustics',
+          'activityCycle',
+          'ecology',
+          'updatedAt',
+          'synced'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'catalogCode',
+          'scientificName',
+          'commonName',
+          'taxon',
+          'iucn',
+          'medicalAlert',
+          'curationStatus',
+          'isSample',
+          'photoUrl',
+          'videoUrl',
+          'photoTag',
+          'bioacoustics',
+          'activityCycle',
+          'ecology',
+          'featuredNote',
+          'updatedAt',
+          'synced',
+          'creatorName'
+        ])
+        && isValidId(data.id)
+        && data.catalogCode is string && data.catalogCode.size() >= 1 && data.catalogCode.size() <= 64
+        && data.scientificName is string && data.scientificName.size() >= 1 && data.scientificName.size() <= 200
+        && data.commonName is string && data.commonName.size() >= 1 && data.commonName.size() <= 200
+        && data.taxon in ['Aves', 'Anfibios', 'Reptiles', 'Mamíferos', 'Plantas', 'Insectos']
+        && data.iucn in ['LC', 'NT', 'VU', 'EN', 'CR']
+        && data.medicalAlert is bool
+        && data.curationStatus in ['Validado', 'En revisión', 'Borrador local']
+        && data.isSample == true
+        && data.photoUrl is string && data.photoUrl.size() <= 2000
+        && (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() <= 2000))
+        && data.photoTag is string && data.photoTag.size() <= 64
+        && isValidBioacoustics(data.bioacoustics)
+        && data.activityCycle in ['Diurna', 'Nocturna', 'Crepuscular', 'Permanente (Flora)']
+        && isValidEcology(data.ecology)
+        && (!('featuredNote' in data) || (data.featuredNote is string && data.featuredNote.size() <= 500))
+        && data.updatedAt is string && data.updatedAt.size() <= 64
+        && data.synced is bool
+        && (!('creatorName' in data) || (data.creatorName is string && data.creatorName.size() <= 120));
+    }
+
+    function isValidSighting(data) {
+      return data.keys().hasAll([
+          'id',
+          'occurrenceId',
+          'speciesId',
+          'individualCount',
+          'observedDate',
+          'observedTime',
+          'observer',
+          'latitude',
+          'longitude',
+          'elevationM',
+          'locality',
+          'holdridgeZone',
+          'microhabitat',
+          'weatherCondition',
+          'synced',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'occurrenceId',
+          'speciesId',
+          'individualCount',
+          'observationMethod',
+          'sourceDetail',
+          'observedDate',
+          'observedTime',
+          'observer',
+          'latitude',
+          'longitude',
+          'elevationM',
+          'locality',
+          'holdridgeZone',
+          'microhabitat',
+          'weatherCondition',
+          'photoUrl',
+          'videoUrl',
+          'audioUrl',
+          'synced',
+          'createdAt'
+        ])
+        && isValidId(data.id)
+        && data.occurrenceId is string && data.occurrenceId.size() >= 1 && data.occurrenceId.size() <= 160
+        && isValidId(data.speciesId)
+        && data.individualCount is int && data.individualCount >= 1 && data.individualCount <= 5000
+        && (!('observationMethod' in data) || (data.observationMethod in ['En persona', 'Cámara trampa', 'Reporte de tercero']))
+        && (!('sourceDetail' in data) || (data.sourceDetail is string && data.sourceDetail.size() <= 300))
+        && data.observedDate is string && data.observedDate.size() <= 32
+        && data.observedTime is string && data.observedTime.size() <= 16
+        && data.observer is string && data.observer.size() >= 1 && data.observer.size() <= 120
+        && data.latitude is number && data.latitude >= -90 && data.latitude <= 90
+        && data.longitude is number && data.longitude >= -180 && data.longitude <= 180
+        && data.elevationM is int && data.elevationM >= 0 && data.elevationM <= 6000
+        && data.locality is string && data.locality.size() >= 1 && data.locality.size() <= 240
+        && data.holdridgeZone in ['bmh-P', 'bmh-MB', 'bp-MB', 'bp-M', 'pp-SA']
+        && data.microhabitat is string && data.microhabitat.size() <= 400
+        && data.weatherCondition in ['Despejado', 'Neblina montana', 'Lluvia ligera', 'Noche húmeda']
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2000))
+        && (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() <= 2000))
+        && (!('audioUrl' in data) || (data.audioUrl is string && data.audioUrl.size() <= 2000))
+        && data.synced is bool
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidChangeLog(data) {
+      return data.keys().hasAll(['id', 'actorName', 'action', 'target', 'timestamp'])
+        && data.keys().hasOnly(['id', 'actorName', 'action', 'target', 'details', 'timestamp'])
+        && isValidId(data.id)
+        && data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 120
+        && data.action is string && data.action.size() >= 1 && data.action.size() <= 64
+        && data.target is string && data.target.size() >= 1 && data.target.size() <= 240
+        && (!('details' in data) || (data.details is string && data.details.size() <= 400))
+        && data.timestamp is string && data.timestamp.size() <= 64;
+    }
+
+    function isValidSyncLog(data) {
+      return data.keys().hasAll(['batchHash', 'timestamp', 'recordsSynced', 'deviceProfile'])
+        && data.keys().hasOnly(['batchHash', 'timestamp', 'recordsSynced', 'deviceProfile'])
+        && isValidId(data.batchHash)
+        && data.timestamp is string && data.timestamp.size() <= 64
+        && data.recordsSynced is int && data.recordsSynced >= 0 && data.recordsSynced <= 50000
+        && data.deviceProfile is string && data.deviceProfile.size() >= 1 && data.deviceProfile.size() <= 120;
+    }
+
+    match /test/connection {
+      allow get: if true;
+    }
+
+    match /species/{speciesId} {
+      allow get: if isValidId(speciesId);
+      allow list: if resource.data.isSample == true;
+      allow create: if isValidId(speciesId) && incoming().id == speciesId && isValidSpecies(incoming());
+      allow update: if isValidId(speciesId)
+        && incoming().id == existing().id
+        && isValidSpecies(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'catalogCode',
+          'scientificName',
+          'commonName',
+          'taxon',
+          'iucn',
+          'medicalAlert',
+          'curationStatus',
+          'isSample',
+          'photoUrl',
+          'videoUrl',
+          'photoTag',
+          'bioacoustics',
+          'activityCycle',
+          'ecology',
+          'featuredNote',
+          'updatedAt',
+          'synced',
+          'creatorName'
+        ]);
+      allow delete: if isValidId(speciesId);
+    }
+
+    match /sightings/{sightingId} {
+      allow get: if isValidId(sightingId);
+      allow list: if resource.data.individualCount >= 1;
+      allow create: if isValidId(sightingId)
+        && incoming().id == sightingId
+        && isValidSighting(incoming())
+        && exists(/databases/$(database)/documents/species/$(incoming().speciesId));
+      allow update: if isValidId(sightingId)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && isValidSighting(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'speciesId',
+          'individualCount',
+          'observationMethod',
+          'sourceDetail',
+          'observedDate',
+          'observedTime',
+          'observer',
+          'latitude',
+          'longitude',
+          'elevationM',
+          'locality',
+          'holdridgeZone',
+          'microhabitat',
+          'weatherCondition',
+          'photoUrl',
+          'videoUrl',
+          'audioUrl',
+          'synced'
+        ]);
+      allow delete: if isValidId(sightingId);
+    }
+
+    match /changelogs/{changeLogId} {
+      allow get: if isValidId(changeLogId);
+      allow list: if resource.data.timestamp >= '';
+      allow create: if isValidId(changeLogId) && incoming().id == changeLogId && isValidChangeLog(incoming());
+      allow delete: if isValidId(changeLogId);
+    }
+
+    match /synclogs/{syncLogId} {
+      allow get: if isValidId(syncLogId);
+      allow list: if resource.data.recordsSynced >= 0;
+      allow create: if isValidId(syncLogId) && incoming().batchHash == syncLogId && isValidSyncLog(incoming());
+      allow delete: if isValidId(syncLogId);
+    }
+  }
+}
