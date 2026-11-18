@@ -558,22 +558,37 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                           <span className="rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary">
                             {obs.observationMethod || 'En persona'}
                           </span>
+                          {!obs.synced && (
+                            <span className="rounded border border-coral/40 bg-coral/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-coral">
+                              Offline · Pendiente
+                            </span>
+                          )}
                           {obs.sourceDetail && (
                             <span className="truncate max-w-[180px] text-foreground/80">
                               {obs.sourceDetail}
                             </span>
                           )}
                           <span>· {obs.weatherCondition}</span>
-                          {obs.photoUrl && (
+                          {(obs.photoUrl || obs.localPhotoId) && (
                             <Camera className="h-3 w-3 text-secondary" />
                           )}
-                          {obs.videoUrl && (
+                          {(obs.videoUrl || obs.localVideoId) && (
                             <Video className="h-3 w-3 text-primary" />
                           )}
                           {obs.audioUrl && (
                             <Volume2 className="h-3 w-3 text-coral" />
                           )}
+                          {obs.localMediaSummary && (
+                            <span className="font-mono text-[11px] text-secondary">
+                              · {obs.localMediaSummary}
+                            </span>
+                          )}
                         </div>
+                        {obs.notes && (
+                          <p className="mt-1.5 line-clamp-2 text-xs text-foreground/80">
+                            Notas: {obs.notes}
+                          </p>
+                        )}
                       </div>
 
                       <div className="shrink-0 text-right font-mono text-xs">
@@ -581,7 +596,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                           {obs.individualCount} ind.
                         </span>
                         <p className="mt-0.5 text-muted">{obs.elevationM} m</p>
-                        <p className="text-muted/80">{obs.observedDate}</p>
+                        <p className="text-muted/80">
+                          {obs.observedDate} · {obs.observedTime}
+                        </p>
                       </div>
                     </button>
                   );

@@ -20,10 +20,13 @@ import {
   toFirestoreSightingPayload,
   toFirestoreSpeciesPayload,
   toFirestoreSyncLogPayload,
+  uploadSightingMediaCapture,
 } from '../firebase';
 import type {
   ChangeLogAction,
   ChangeLogEntry,
+  LocalMediaCapture,
+  OfflineOutboxItem,
   SightingEntry,
   SpeciesRecord,
   SyncBatchLog,
@@ -31,21 +34,124 @@ import type {
 } from '../types/cbls';
 import { computeDatasetChecksum, validateAccessCode } from '../utils/ecology';
 import {
+  idbDeleteSpecies,
+  idbEnqueueOutboxItem,
   idbGetAllChangeLogs,
+  idbGetAllMediaCaptures,
+  idbGetAllOutboxItems,
   idbGetAllSightings,
   idbGetAllSpecies,
   idbGetAllSyncLogs,
+  idbGetMediaCapture,
+  idbRemoveOutboxItem,
   idbReplaceAll,
+  idbSaveChangeLog,
+  idbSaveMediaCapture,
+  idbSaveSighting,
+  idbSaveSpecies,
+  idbUpdateMediaUploadedUrl,
 } from '../utils/indexedDb';
 
 const SESSION_STORAGE_KEY = 'cbls_active_observer_session';
 const CLOUD_MIGRATED_KEY = 'cbls_firestore_migrated_v1';
+
+export interface SightingMediaInput {
+  photoFile?: File | null;
+  videoFile?: File | null;
+}
+
+function mergePendingSpecies(
+  cloudItems: SpeciesRecord[],
+  outbox: OfflineOutboxItem[],
+): SpeciesRecord[] {
+  const deletedIds = new Set(
+    outbox.filter((o) => o.kind === 'species_delete').map((o) => o.entityId),
+  );
+  const byId = new Map<string, SpeciesRecord>();
+  for (const sp of cloudItems) {
+    if (!deletedIds.has(sp.id)) {
+      byId.set(sp.id, sp);
+    }
+  }
+  for (const item of outbox) {
+    if (item.kind === 'species_upsert') {
+      const sp = item.payload as SpeciesRecord;
+      if (sp && sp.id && !deletedIds.has(sp.id)) {
+        byId.set(sp.id, { ...sp, synced: false });
+      }
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) =>
+    (b.updatedAt || '').localeCompare(a.updatedAt || ''),
+  );
+}
+
+function mergePendingSightings(
+  cloudItems: SightingEntry[],
+  outbox: OfflineOutboxItem[],
+): SightingEntry[] {
+  const deletedSpeciesIds = new Set(
+    outbox.filter((o) => o.kind === 'species_delete').map((o) => o.entityId),
+  );
+  const byId = new Map<string, SightingEntry>();
+  for (const si of cloudItems) {
+    if (!deletedSpeciesIds.has(si.speciesId)) {
+      byId.set(si.id, si);
+    }
+  }
+  for (const item of outbox) {
+    if (item.kind === 'sighting_create') {
+      const si = item.payload as SightingEntry;
+      if (si && si.id && !deletedSpeciesIds.has(si.speciesId)) {
+        byId.set(si.id, { ...si, synced: false });
+      }
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) =>
+    (b.createdAt || '').localeCompare(a.createdAt || ''),
+  );
+}
+
+function mergePendingChangeLogs(
+  cloudItems: ChangeLogEntry[],
+  outbox: OfflineOutboxItem[],
+): ChangeLogEntry[] {
+  const byId = new Map<string, ChangeLogEntry>();
+  for (const ch of cloudItems) {
+    byId.set(ch.id, ch);
+  }
+  for (const item of outbox) {
+    if (item.kind === 'changelog_create') {
+      const ch = item.payload as ChangeLogEntry;
+      if (ch && ch.id) {
+        byId.set(ch.id, ch);
+      }
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) =>
+    (b.timestamp || '').localeCompare(a.timestamp || ''),
+  );
+}
+
+function formatMb(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function useCblsStore() {
   const [species, setSpecies] = useState<SpeciesRecord[]>([]);
   const [sightings, setSightings] = useState<SightingEntry[]>([]);
   const [syncLogs, setSyncLogs] = useState<SyncBatchLog[]>([]);
   const [changeLogs, setChangeLogs] = useState<ChangeLogEntry[]>([]);
+  const [outboxItems, setOutboxItems] = useState<OfflineOutboxItem[]>([]);
+  const [localMediaStats, setLocalMediaStats] = useState<{
+    count: number;
+    totalBytes: number;
+  }>({ count: 0, totalBytes: 0 });
+  const [isAutoSyncing, setIsAutoSyncing] = useState<boolean>(false);
+
   const [offlineAutonomousMode, setOfflineAutonomousMode] = useState<boolean>(false);
   const [browserOnline, setBrowserOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true,
@@ -82,6 +188,13 @@ export function useCblsStore() {
   const userSessionRef = useRef(userSession);
   userSessionRef.current = userSession;
 
+  const outboxRef = useRef<OfflineOutboxItem[]>([]);
+  outboxRef.current = outboxItems;
+
+  const offlineAutonomousRef = useRef(offlineAutonomousMode);
+  offlineAutonomousRef.current = offlineAutonomousMode;
+
+  const syncInFlightRef = useRef<Promise<number> | null>(null);
   const migrationRanRef = useRef(false);
   const idbMirrorReadyRef = useRef(false);
   const initialIdbPromiseRef = useRef<Promise<{
@@ -95,24 +208,50 @@ export function useCblsStore() {
     changeLogs: [] as ChangeLogEntry[],
   });
 
-  // Load local IndexedDB snapshot immediately while Firestore streams live cloud data
+  const refreshMediaStats = useCallback(async () => {
+    try {
+      const allMedia = await idbGetAllMediaCaptures();
+      setLocalMediaStats({
+        count: allMedia.length,
+        totalBytes: allMedia.reduce((acc, m) => acc + (m.sizeBytes || 0), 0),
+      });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Load local IndexedDB snapshot + outbox + media stats immediately on boot
   const reloadFromIdb = useCallback(async () => {
     const readPromise = (async () => {
       try {
-        const [spList, siList, logs, history] = await Promise.all([
+        const [spList, siList, logs, history, queued, mediaList] = await Promise.all([
           idbGetAllSpecies(),
           idbGetAllSightings(),
           idbGetAllSyncLogs(),
           idbGetAllChangeLogs(),
+          idbGetAllOutboxItems(),
+          idbGetAllMediaCaptures(),
         ]);
+
+        outboxRef.current = queued;
+        setOutboxItems(queued);
+        setLocalMediaStats({
+          count: mediaList.length,
+          totalBytes: mediaList.reduce((acc, m) => acc + (m.sizeBytes || 0), 0),
+        });
+
         const cleanSi = siList.filter(
           (s) => s.microhabitat !== 'Registro primario al catalogar la especie',
         );
-        setSpecies(spList);
-        setSightings(cleanSi);
+        const mergedSp = mergePendingSpecies(spList, queued);
+        const mergedSi = mergePendingSightings(cleanSi, queued);
+        const mergedCh = mergePendingChangeLogs(history, queued);
+
+        setSpecies(mergedSp);
+        setSightings(mergedSi);
         setSyncLogs(logs);
-        setChangeLogs(history);
-        return { species: spList, sightings: cleanSi };
+        setChangeLogs(mergedCh);
+        return { species: mergedSp, sightings: mergedSi };
       } catch (err) {
         console.error('Error al leer IndexedDB:', err);
         return { species: [], sightings: [] };
@@ -122,7 +261,7 @@ export function useCblsStore() {
     return readPromise;
   }, []);
 
-  // Mirror cloud state into IndexedDB for offline telemetry & backup compatibility
+  // Mirror cloud state into IndexedDB for offline readiness
   const syncIdbMirror = useCallback(
     (partial: Partial<typeof latestDataRef.current>) => {
       latestDataRef.current = { ...latestDataRef.current, ...partial };
@@ -132,7 +271,165 @@ export function useCblsStore() {
     [],
   );
 
-  // One-time upload of pre-existing local IndexedDB species (e.g. Puma added prior to Firebase provisioning)
+  // Automatic synchronization function: uploads offline outbox & captured media to Firebase
+  const syncOfflineOutboxToFirebase = useCallback(
+    async (options?: { silentIfEmpty?: boolean }): Promise<number> => {
+      if (offlineAutonomousRef.current || !navigator.onLine) {
+        return 0;
+      }
+
+      if (syncInFlightRef.current) {
+        return syncInFlightRef.current;
+      }
+
+      const task = (async () => {
+        const queue = await idbGetAllOutboxItems();
+        if (queue.length === 0) {
+          outboxRef.current = [];
+          setOutboxItems([]);
+          return 0;
+        }
+
+        setIsAutoSyncing(true);
+        let syncedCount = 0;
+
+        try {
+          await enableNetwork(db).catch(() => undefined);
+
+          // Respect dependency order: species upserts -> sightings -> deletes -> changelogs
+          const orderWeight: Record<OfflineOutboxItem['kind'], number> = {
+            species_upsert: 1,
+            sighting_create: 2,
+            species_delete: 3,
+            changelog_create: 4,
+          };
+          const sorted = [...queue].sort(
+            (a, b) =>
+              orderWeight[a.kind] - orderWeight[b.kind] ||
+              a.createdAt.localeCompare(b.createdAt),
+          );
+
+          for (const item of sorted) {
+            if (!navigator.onLine || offlineAutonomousRef.current) break;
+
+            try {
+              if (item.kind === 'species_upsert') {
+                const rawSp = item.payload as SpeciesRecord;
+                const cleanSp = toFirestoreSpeciesPayload(
+                  rawSp,
+                  rawSp.updatedAt || new Date().toISOString(),
+                );
+                await setDoc(doc(db, 'species', cleanSp.id), cleanSp);
+                await idbSaveSpecies({ ...cleanSp, synced: true });
+                await idbRemoveOutboxItem(item.id);
+                syncedCount += 1;
+              } else if (item.kind === 'sighting_create') {
+                const rawSi = item.payload as SightingEntry;
+                let nextPhotoUrl = rawSi.photoUrl;
+                let nextVideoUrl = rawSi.videoUrl;
+
+                // Try uploading offline-captured photo/video Blobs to Firebase Storage if available
+                if (rawSi.localPhotoId && !nextPhotoUrl) {
+                  const cap = await idbGetMediaCapture(rawSi.localPhotoId);
+                  if (cap) {
+                    const url = await uploadSightingMediaCapture(cap);
+                    if (url) {
+                      nextPhotoUrl = url;
+                      await idbUpdateMediaUploadedUrl(cap.id, url);
+                    }
+                  }
+                }
+                if (rawSi.localVideoId && !nextVideoUrl) {
+                  const cap = await idbGetMediaCapture(rawSi.localVideoId);
+                  if (cap) {
+                    const url = await uploadSightingMediaCapture(cap);
+                    if (url) {
+                      nextVideoUrl = url;
+                      await idbUpdateMediaUploadedUrl(cap.id, url);
+                    }
+                  }
+                }
+
+                const cleanSi = toFirestoreSightingPayload({
+                  ...rawSi,
+                  photoUrl: nextPhotoUrl,
+                  videoUrl: nextVideoUrl,
+                });
+                await setDoc(doc(db, 'sightings', cleanSi.id), cleanSi);
+                await idbSaveSighting({ ...cleanSi, synced: true });
+                await idbRemoveOutboxItem(item.id);
+                syncedCount += 1;
+              } else if (item.kind === 'species_delete') {
+                const target = item.payload as {
+                  speciesId: string;
+                  sightingIds: string[];
+                };
+                const batch = writeBatch(db);
+                batch.delete(doc(db, 'species', target.speciesId));
+                (target.sightingIds || []).forEach((sid) => {
+                  batch.delete(doc(db, 'sightings', sid));
+                });
+                await batch.commit();
+                await idbRemoveOutboxItem(item.id);
+                syncedCount += 1;
+              } else if (item.kind === 'changelog_create') {
+                const rawCh = item.payload as ChangeLogEntry;
+                const cleanCh = toFirestoreChangeLogPayload(rawCh);
+                await setDoc(doc(db, 'changelogs', cleanCh.id), cleanCh);
+                await idbSaveChangeLog(cleanCh);
+                await idbRemoveOutboxItem(item.id);
+                syncedCount += 1;
+              }
+            } catch (err) {
+              console.warn('Reintento pendiente para item offline:', item.id, err);
+              // Keep item in outbox so next online cycle retries cleanly
+            }
+          }
+
+          const remaining = await idbGetAllOutboxItems();
+          outboxRef.current = remaining;
+          setOutboxItems(remaining);
+
+          if (syncedCount > 0) {
+            const hash = computeDatasetChecksum(
+              latestDataRef.current.species,
+              latestDataRef.current.sightings,
+            );
+            const actor =
+              userSessionRef.current?.observerName || 'Dispositivo de campo';
+            const syncLog = toFirestoreSyncLogPayload({
+              batchHash: `${hash}-${Date.now().toString().slice(-4)}`,
+              timestamp: new Date().toLocaleString('es-CR'),
+              recordsSynced: syncedCount,
+              deviceProfile: actor,
+            });
+            await setDoc(doc(db, 'synclogs', syncLog.batchHash), syncLog).catch(
+              () => undefined,
+            );
+            setLastSavedIso(new Date().toISOString());
+            setStatusMessage(
+              `Conexión recuperada: ${syncedCount} registro(s) guardados offline se sincronizaron automáticamente con Firebase.`,
+            );
+          } else if (!options?.silentIfEmpty && remaining.length > 0) {
+            setStatusMessage(
+              `${remaining.length} registro(s) permanecen en cola local esperando conexión estable.`,
+            );
+          }
+
+          return syncedCount;
+        } finally {
+          setIsAutoSyncing(false);
+          syncInFlightRef.current = null;
+        }
+      })();
+
+      syncInFlightRef.current = task;
+      return task;
+    },
+    [],
+  );
+
+  // One-time upload of pre-existing local IndexedDB species
   const migrateLegacyLocalRecordsIfNeeded = useCallback(
     async (cloudSpeciesList: SpeciesRecord[]) => {
       if (migrationRanRef.current) return;
@@ -197,17 +494,37 @@ export function useCblsStore() {
     [],
   );
 
-  // Real-time Firestore subscriptions across all devices (Vercel, mobile, desktop)
+  // Real-time Firestore subscriptions + automatic reconnection sync listeners
   useEffect(() => {
-    void reloadFromIdb();
+    void reloadFromIdb().then(() => {
+      if (navigator.onLine && !offlineAutonomousRef.current) {
+        void syncOfflineOutboxToFirebase({ silentIfEmpty: true });
+      }
+    });
 
-    const onOnline = () => setBrowserOnline(true);
+    const onOnline = () => {
+      setBrowserOnline(true);
+      if (!offlineAutonomousRef.current) {
+        void syncOfflineOutboxToFirebase({ silentIfEmpty: true });
+      }
+    };
     const onOffline = () => {
       setBrowserOnline(false);
       setCloudConnected(false);
     };
+    const onVisibilityChange = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        navigator.onLine &&
+        !offlineAutonomousRef.current
+      ) {
+        void syncOfflineOutboxToFirebase({ silentIfEmpty: true });
+      }
+    };
+
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     const speciesQuery = query(
       collection(db, 'species'),
@@ -233,23 +550,23 @@ export function useCblsStore() {
       speciesQuery,
       { includeMetadataChanges: true },
       (snapshot) => {
-        const items = snapshot.docs
-          .map((d) => {
-            const data = d.data() as SpeciesRecord;
-            return {
-              ...data,
-              isSample: true,
-              synced: !d.metadata.hasPendingWrites,
-            };
-          })
-          .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+        const items = snapshot.docs.map((d) => {
+          const data = d.data() as SpeciesRecord;
+          return {
+            ...data,
+            isSample: true,
+            synced: !d.metadata.hasPendingWrites,
+          };
+        });
 
         pendingCounts.sp = snapshot.docs.filter((d) => d.metadata.hasPendingWrites).length;
         updatePending();
         setCloudConnected(!snapshot.metadata.fromCache);
-        setSpecies(items);
+
+        const merged = mergePendingSpecies(items, outboxRef.current);
+        setSpecies(merged);
         setLastSavedIso(new Date().toISOString());
-        syncIdbMirror({ species: items });
+        syncIdbMirror({ species: merged });
 
         if (!snapshot.metadata.fromCache) {
           void migrateLegacyLocalRecordsIfNeeded(items);
@@ -280,13 +597,14 @@ export function useCblsStore() {
               synced: !d.metadata.hasPendingWrites,
             };
           })
-          .filter((s) => s.microhabitat !== 'Registro primario al catalogar la especie')
-          .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          .filter((s) => s.microhabitat !== 'Registro primario al catalogar la especie');
 
         pendingCounts.si = snapshot.docs.filter((d) => d.metadata.hasPendingWrites).length;
         updatePending();
-        setSightings(items);
-        syncIdbMirror({ sightings: items });
+
+        const merged = mergePendingSightings(items, outboxRef.current);
+        setSightings(merged);
+        syncIdbMirror({ sightings: merged });
       },
       (error) => {
         try {
@@ -300,11 +618,10 @@ export function useCblsStore() {
     const unsubChangeLogs = onSnapshot(
       changelogsQuery,
       (snapshot) => {
-        const items = snapshot.docs
-          .map((d) => d.data() as ChangeLogEntry)
-          .sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
-        setChangeLogs(items);
-        syncIdbMirror({ changeLogs: items });
+        const items = snapshot.docs.map((d) => d.data() as ChangeLogEntry);
+        const merged = mergePendingChangeLogs(items, outboxRef.current);
+        setChangeLogs(merged);
+        syncIdbMirror({ changeLogs: merged });
       },
       (error) => {
         try {
@@ -334,12 +651,18 @@ export function useCblsStore() {
     return () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       unsubSpecies();
       unsubSightings();
       unsubChangeLogs();
       unsubSyncLogs();
     };
-  }, [reloadFromIdb, syncIdbMirror, migrateLegacyLocalRecordsIfNeeded]);
+  }, [
+    reloadFromIdb,
+    syncIdbMirror,
+    migrateLegacyLocalRecordsIfNeeded,
+    syncOfflineOutboxToFirebase,
+  ]);
 
   // Trigger legacy migration immediately if user logs in as admin after initial load
   useEffect(() => {
@@ -347,6 +670,16 @@ export function useCblsStore() {
       void migrateLegacyLocalRecordsIfNeeded(species);
     }
   }, [userSession, cloudConnected, species, migrateLegacyLocalRecordsIfNeeded]);
+
+  const effectiveOffline = offlineAutonomousMode || !browserOnline;
+  const wsConnected = !effectiveOffline && (cloudConnected || browserOnline);
+
+  const enqueueOutbox = useCallback(async (item: OfflineOutboxItem) => {
+    await idbEnqueueOutboxItem(item);
+    const updated = await idbGetAllOutboxItems();
+    outboxRef.current = updated;
+    setOutboxItems(updated);
+  }, []);
 
   const appendCloudChangeLog = useCallback(
     async (
@@ -364,14 +697,42 @@ export function useCblsStore() {
         details,
         timestamp: new Date().toISOString(),
       });
+
+      await idbSaveChangeLog(entry).catch(() => undefined);
+      setChangeLogs((prev) =>
+        [entry, ...prev.filter((c) => c.id !== entry.id)].sort((a, b) =>
+          b.timestamp.localeCompare(a.timestamp),
+        ),
+      );
+
+      if (offlineAutonomousRef.current || !navigator.onLine) {
+        await enqueueOutbox({
+          id: `outbox-chg-${entry.id}`,
+          kind: 'changelog_create',
+          entityId: entry.id,
+          payload: entry,
+          createdAt: entry.timestamp,
+          retries: 0,
+        });
+        return entry;
+      }
+
       try {
         await setDoc(doc(db, 'changelogs', entry.id), entry);
       } catch (err) {
-        console.error('Error guardando historial:', err);
+        console.warn('Changelog guardado offline en cola:', err);
+        await enqueueOutbox({
+          id: `outbox-chg-${entry.id}`,
+          kind: 'changelog_create',
+          entityId: entry.id,
+          payload: entry,
+          createdAt: entry.timestamp,
+          retries: 0,
+        });
       }
       return entry;
     },
-    [userSession],
+    [userSession, enqueueOutbox],
   );
 
   const saveUserSession = useCallback(
@@ -409,14 +770,11 @@ export function useCblsStore() {
     [],
   );
 
-  const effectiveOffline = offlineAutonomousMode || !browserOnline;
-  const wsConnected = !effectiveOffline && (cloudConnected || browserOnline);
-
   const pendingSyncCount = useMemo(() => {
     const unsyncedLocal =
       species.filter((s) => !s.synced).length + sightings.filter((o) => !o.synced).length;
-    return Math.max(pendingCloudWrites, unsyncedLocal);
-  }, [pendingCloudWrites, species, sightings]);
+    return Math.max(pendingCloudWrites, unsyncedLocal, outboxItems.length);
+  }, [pendingCloudWrites, species, sightings, outboxItems.length]);
 
   const totalIndividuals = useMemo(
     () => sightings.reduce((sum, s) => sum + s.individualCount, 0),
@@ -430,34 +788,39 @@ export function useCblsStore() {
 
   const storageBytes = useMemo(() => {
     try {
-      return new Blob([JSON.stringify({ species, sightings })]).size;
+      const jsonSize = new Blob([JSON.stringify({ species, sightings })]).size;
+      return jsonSize + localMediaStats.totalBytes;
     } catch {
-      return 0;
+      return localMediaStats.totalBytes;
     }
-  }, [species, sightings]);
+  }, [species, sightings, localMediaStats.totalBytes]);
 
   const toggleAutonomousMode = useCallback(async () => {
     const next = !offlineAutonomousMode;
     setOfflineAutonomousMode(next);
+    offlineAutonomousRef.current = next;
     try {
       if (next) {
         await disableNetwork(db);
         setCloudConnected(false);
         setStatusMessage(
-          'Modo Campo Autónomo activado: Datos guardados localmente sin consumir red.',
+          'Modo Campo Autónomo activado: Todo se guarda en IndexedDB local sin consumir red.',
         );
       } else {
         await enableNetwork(db);
         setStatusMessage(
-          'Enlace en la nube reactivado: sincronizando cambios en tiempo real con todos los dispositivos.',
+          'Enlace en la nube reactivado: sincronizando registros pendientes con Firebase...',
         );
+        if (navigator.onLine) {
+          void syncOfflineOutboxToFirebase({ silentIfEmpty: true });
+        }
       }
     } catch (err) {
       console.error('Error al cambiar estado de red Firestore:', err);
     }
-  }, [offlineAutonomousMode]);
+  }, [offlineAutonomousMode, syncOfflineOutboxToFirebase]);
 
-  // Upsert sample species directly into Cloud Firestore (live across all devices)
+  // Upsert sample species (offline-safe IndexedDB + Cloud Firestore auto-sync)
   const upsertSpecies = useCallback(
     async (record: SpeciesRecord, overrideAdminCode?: string): Promise<boolean> => {
       const authCode = overrideAdminCode || userSession?.observerCode || '';
@@ -482,11 +845,45 @@ export function useCblsStore() {
         nowIso,
       );
 
+      // Save immediately in IndexedDB + UI state (instantaneous even in zero-signal mountains)
+      const isOfflineNow = effectiveOffline || !navigator.onLine;
+      const localRecord: SpeciesRecord = {
+        ...cleanPayload,
+        synced: !isOfflineNow,
+      };
+      await idbSaveSpecies(localRecord).catch(() => undefined);
+      setSpecies((prev) =>
+        exists
+          ? prev.map((s) => (s.id === localRecord.id ? localRecord : s))
+          : [localRecord, ...prev],
+      );
+      setLastSavedIso(nowIso);
+
+      if (isOfflineNow) {
+        await enqueueOutbox({
+          id: `outbox-sp-${localRecord.id}`,
+          kind: 'species_upsert',
+          entityId: localRecord.id,
+          payload: localRecord,
+          createdAt: nowIso,
+          retries: 0,
+        });
+        await appendCloudChangeLog(
+          exists ? 'Editó especie' : 'Creó especie',
+          `${localRecord.commonName} (${localRecord.catalogCode})`,
+          'Guardado offline en IndexedDB',
+        );
+        setStorageError(null);
+        setStatusMessage(
+          `Especie guardada offline en el dispositivo: ${localRecord.commonName}. Se sincronizará con Firebase al recuperar señal.`,
+        );
+        return true;
+      }
+
       try {
         await setDoc(doc(db, 'species', cleanPayload.id), cleanPayload);
         localStorage.setItem(CLOUD_MIGRATED_KEY, '1');
         setStorageError(null);
-        setLastSavedIso(nowIso);
 
         await appendCloudChangeLog(
           exists ? 'Editó especie' : 'Creó especie',
@@ -495,32 +892,34 @@ export function useCblsStore() {
         );
 
         setStatusMessage(
-          effectiveOffline
-            ? `Especie de muestra guardada offline: ${cleanPayload.commonName}. Se subirá a la nube al volver a tener internet.`
-            : `Especie de muestra guardada y sincronizada en tiempo real con todos los dispositivos: ${cleanPayload.commonName}`,
+          `Especie de muestra guardada y sincronizada en tiempo real con todos los dispositivos: ${cleanPayload.commonName}`,
         );
         return true;
       } catch (err) {
-        try {
-          handleFirestoreError(
-            err,
-            exists ? OperationType.UPDATE : OperationType.CREATE,
-            `species/${cleanPayload.id}`,
-          );
-        } catch (wrapped) {
-          setStorageError(
-            wrapped instanceof Error && wrapped.message.includes('Quota exceeded')
-              ? 'Cuota de Firestore excedida. Intenta más tarde.'
-              : 'No se pudo guardar la especie en la nube.',
-          );
-        }
-        return false;
+        console.warn('Guardando especie en cola offline tras fallo de red:', err);
+        await enqueueOutbox({
+          id: `outbox-sp-${localRecord.id}`,
+          kind: 'species_upsert',
+          entityId: localRecord.id,
+          payload: { ...localRecord, synced: false },
+          createdAt: nowIso,
+          retries: 0,
+        });
+        await appendCloudChangeLog(
+          exists ? 'Editó especie' : 'Creó especie',
+          `${localRecord.commonName} (${localRecord.catalogCode})`,
+          'En cola de sincronización local',
+        );
+        setStatusMessage(
+          `Sin enlace estable: ${localRecord.commonName} quedó resguardada localmente y se subirá automáticamente al reconectar.`,
+        );
+        return true;
       }
     },
-    [species, userSession, effectiveOffline, appendCloudChangeLog],
+    [species, userSession, effectiveOffline, enqueueOutbox, appendCloudChangeLog],
   );
 
-  // Delete Species + its sightings in Cloud Firestore
+  // Delete Species + its sightings (offline-safe IndexedDB + Cloud Firestore)
   const deleteSpecies = useCallback(
     async (speciesId: string, overrideAdminCode?: string) => {
       const authCode = overrideAdminCode || userSession?.observerCode || '';
@@ -534,9 +933,33 @@ export function useCblsStore() {
       const targetLabel = targetSp
         ? `${targetSp.commonName} (${targetSp.catalogCode})`
         : speciesId;
+      const relatedSightings = sightings.filter((s) => s.speciesId === speciesId);
+
+      // Delete immediately from IndexedDB + UI state
+      await idbDeleteSpecies(speciesId).catch(() => undefined);
+      void refreshMediaStats();
+      setSpecies((prev) => prev.filter((s) => s.id !== speciesId));
+      setSightings((prev) => prev.filter((s) => s.speciesId !== speciesId));
+
+      const isOfflineNow = effectiveOffline || !navigator.onLine;
+      if (isOfflineNow) {
+        await enqueueOutbox({
+          id: `outbox-del-${speciesId}`,
+          kind: 'species_delete',
+          entityId: speciesId,
+          payload: {
+            speciesId,
+            sightingIds: relatedSightings.map((s) => s.id),
+          },
+          createdAt: new Date().toISOString(),
+          retries: 0,
+        });
+        await appendCloudChangeLog('Eliminó especie', targetLabel, 'Pendiente de sincronizar');
+        setStatusMessage('Especie eliminada localmente. Se actualizará en la nube al reconectar.');
+        return;
+      }
 
       try {
-        const relatedSightings = sightings.filter((s) => s.speciesId === speciesId);
         const batch = writeBatch(db);
         batch.delete(doc(db, 'species', speciesId));
         relatedSightings.forEach((si) => {
@@ -555,59 +978,211 @@ export function useCblsStore() {
         }
       }
     },
-    [species, sightings, userSession, appendCloudChangeLog],
+    [
+      species,
+      sightings,
+      userSession,
+      effectiveOffline,
+      enqueueOutbox,
+      appendCloudChangeLog,
+      refreshMediaStats,
+    ],
   );
 
-  // Register real field sighting in Cloud Firestore
+  // Register field sighting + notes + GPS + local captured photo/video (100% offline capable)
   const addSighting = useCallback(
-    async (entry: Omit<SightingEntry, 'id' | 'occurrenceId' | 'synced' | 'createdAt'>) => {
+    async (
+      entry: Omit<SightingEntry, 'id' | 'occurrenceId' | 'synced' | 'createdAt'>,
+      mediaInput?: SightingMediaInput,
+    ) => {
       const now = new Date();
+      const nowIso = now.toISOString();
       const year = entry.observedDate.slice(0, 4) || String(now.getFullYear());
       const { observerCode: _omitObserverCode, ...cleanEntry } = entry;
       void _omitObserverCode;
 
-      const cleanPayload = toFirestoreSightingPayload({
+      const sightingId = sanitizeFirestoreId(
+        `obs-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        'obs',
+      );
+
+      let localPhotoId: string | undefined;
+      let localVideoId: string | undefined;
+      const summaryParts: string[] = [];
+
+      // Persist captured photo/video Blob directly in IndexedDB BEFORE network attempts
+      if (mediaInput?.photoFile) {
+        localPhotoId = `img-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+        const photoCap: LocalMediaCapture = {
+          id: localPhotoId,
+          sightingId,
+          kind: 'photo',
+          fileName: mediaInput.photoFile.name || 'captura_campo.jpg',
+          mimeType: mediaInput.photoFile.type || 'image/jpeg',
+          sizeBytes: mediaInput.photoFile.size,
+          blob: mediaInput.photoFile,
+          createdAt: nowIso,
+        };
+        await idbSaveMediaCapture(photoCap);
+        summaryParts.push(`Foto (${formatMb(photoCap.sizeBytes)})`);
+      }
+
+      if (mediaInput?.videoFile) {
+        localVideoId = `vid-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+        const videoCap: LocalMediaCapture = {
+          id: localVideoId,
+          sightingId,
+          kind: 'video',
+          fileName: mediaInput.videoFile.name || 'video_campo.mp4',
+          mimeType: mediaInput.videoFile.type || 'video/mp4',
+          sizeBytes: mediaInput.videoFile.size,
+          blob: mediaInput.videoFile,
+          createdAt: nowIso,
+        };
+        await idbSaveMediaCapture(videoCap);
+        summaryParts.push(`Video (${formatMb(videoCap.sizeBytes)})`);
+      }
+
+      void refreshMediaStats();
+
+      const basePayload = toFirestoreSightingPayload({
         ...cleanEntry,
-        id: `obs-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        id: sightingId,
         occurrenceId: `urn:catalog:CBLS:${year}:OBS-${Date.now().toString().slice(-4)}`,
+        localPhotoId,
+        localVideoId,
+        localMediaSummary:
+          summaryParts.length > 0 ? summaryParts.join(' + ') : undefined,
         synced: true,
-        createdAt: now.toISOString(),
+        createdAt: nowIso,
       });
 
-      const sp = species.find((s) => s.id === cleanPayload.speciesId);
+      const sp = species.find((s) => s.id === basePayload.speciesId);
+      const isOfflineNow = effectiveOffline || !navigator.onLine;
 
+      // Save sighting immediately in IndexedDB & React state
+      const localEntry: SightingEntry = {
+        ...basePayload,
+        synced: !isOfflineNow,
+      };
+      await idbSaveSighting(localEntry).catch(() => undefined);
+      setSightings((prev) => [localEntry, ...prev]);
+      setLastSavedIso(nowIso);
+      setStorageError(null);
+
+      const logDetails = `${localEntry.individualCount} ind. · ${localEntry.observationMethod || 'En persona'} · ${localEntry.locality}${
+        localEntry.localMediaSummary ? ` · ${localEntry.localMediaSummary}` : ''
+      }`;
+
+      if (isOfflineNow) {
+        await enqueueOutbox({
+          id: `outbox-si-${localEntry.id}`,
+          kind: 'sighting_create',
+          entityId: localEntry.id,
+          payload: localEntry,
+          createdAt: nowIso,
+          retries: 0,
+        });
+        await appendCloudChangeLog(
+          'Registró avistamiento',
+          sp ? `${sp.commonName} (${sp.catalogCode})` : 'Especie registrada',
+          logDetails,
+          localEntry.observer,
+        );
+        setStatusMessage(
+          `Guardado 100% offline en IndexedDB (${localEntry.observer}${
+            localEntry.localMediaSummary ? ` · ${localEntry.localMediaSummary}` : ''
+          }). Se subirá automáticamente a Firebase al volver a tener internet.`,
+        );
+        return;
+      }
+
+      // Online path: try uploading local media blobs to Firebase Storage (optional, short timeout), then write Firestore
       try {
-        await setDoc(doc(db, 'sightings', cleanPayload.id), cleanPayload);
-        setStorageError(null);
-        setLastSavedIso(now.toISOString());
+        let finalPhotoUrl = basePayload.photoUrl;
+        let finalVideoUrl = basePayload.videoUrl;
+
+        if (localPhotoId && !finalPhotoUrl) {
+          const cap = await idbGetMediaCapture(localPhotoId);
+          if (cap) {
+            const url = await uploadSightingMediaCapture(cap);
+            if (url) {
+              finalPhotoUrl = url;
+              await idbUpdateMediaUploadedUrl(cap.id, url);
+            }
+          }
+        }
+        if (localVideoId && !finalVideoUrl) {
+          const cap = await idbGetMediaCapture(localVideoId);
+          if (cap) {
+            const url = await uploadSightingMediaCapture(cap);
+            if (url) {
+              finalVideoUrl = url;
+              await idbUpdateMediaUploadedUrl(cap.id, url);
+            }
+          }
+        }
+
+        const cloudPayload = toFirestoreSightingPayload({
+          ...basePayload,
+          photoUrl: finalPhotoUrl,
+          videoUrl: finalVideoUrl,
+        });
+
+        await setDoc(doc(db, 'sightings', cloudPayload.id), cloudPayload);
+        await idbSaveSighting({ ...cloudPayload, synced: true }).catch(() => undefined);
 
         await appendCloudChangeLog(
           'Registró avistamiento',
           sp ? `${sp.commonName} (${sp.catalogCode})` : 'Especie registrada',
-          `${cleanPayload.individualCount} ind. · ${cleanPayload.observationMethod || 'En persona'} · ${cleanPayload.locality}`,
-          cleanPayload.observer,
+          logDetails,
+          cloudPayload.observer,
         );
 
         setStatusMessage(
-          effectiveOffline
-            ? `Avistamiento guardado offline por ${cleanPayload.observer}. Se sincronizará al tener internet.`
-            : `Avistamiento sincronizado en tiempo real por ${cleanPayload.observer}: ${cleanPayload.individualCount} ind.`,
+          `Avistamiento sincronizado en tiempo real por ${cloudPayload.observer}: ${cloudPayload.individualCount} ind.`,
         );
       } catch (err) {
-        try {
-          handleFirestoreError(err, OperationType.CREATE, `sightings/${cleanPayload.id}`);
-        } catch {
-          setStorageError('Error al guardar el avistamiento en la nube.');
-        }
+        console.warn('Avistamiento encolado offline tras interrupción de red:', err);
+        await enqueueOutbox({
+          id: `outbox-si-${localEntry.id}`,
+          kind: 'sighting_create',
+          entityId: localEntry.id,
+          payload: { ...localEntry, synced: false },
+          createdAt: nowIso,
+          retries: 0,
+        });
+        await appendCloudChangeLog(
+          'Registró avistamiento',
+          sp ? `${sp.commonName} (${sp.catalogCode})` : 'Especie registrada',
+          logDetails,
+          localEntry.observer,
+        );
+        setStatusMessage(
+          `Conexión inestable: avistamiento y archivos guardados en el dispositivo. Se sincronizarán automáticamente al reconectar.`,
+        );
       }
     },
-    [species, effectiveOffline, appendCloudChangeLog],
+    [
+      species,
+      effectiveOffline,
+      enqueueOutbox,
+      appendCloudChangeLog,
+      refreshMediaStats,
+    ],
   );
 
-  // Manual Sync trigger (re-enables network if needed and writes sync batch audit log)
+  // Manual Sync trigger (runs outbox flush + audit sync batch log)
   const syncPendingRecords = useCallback(async () => {
     if (offlineAutonomousMode) {
-      setStatusMessage('Desactiva el Modo Campo Autónomo para sincronizar en línea.');
+      setStatusMessage('Desactiva el Modo Campo Autónomo para sincronizar con Firebase.');
+      return;
+    }
+
+    if (!navigator.onLine) {
+      setStatusMessage(
+        'Aún no hay señal de internet. Los registros permanecen seguros en IndexedDB y subirán automáticamente al reconectar.',
+      );
       return;
     }
 
@@ -617,12 +1192,13 @@ export function useCblsStore() {
     }
 
     try {
+      const flushed = await syncOfflineOutboxToFirebase({ silentIfEmpty: true });
       await enableNetwork(db);
       const hash = computeDatasetChecksum(species, sightings);
       const logEntry = toFirestoreSyncLogPayload({
         batchHash: hash,
         timestamp: new Date().toLocaleString('es-CR'),
-        recordsSynced: pendingSyncCount,
+        recordsSynced: flushed || pendingSyncCount,
         deviceProfile: userSession.observerName,
       });
 
@@ -634,7 +1210,11 @@ export function useCblsStore() {
         userSession.observerName,
       );
 
-      setStatusMessage(`Todos los dispositivos están sincronizados con la nube (#${hash}).`);
+      setStatusMessage(
+        flushed > 0
+          ? `Sincronización completada: ${flushed} registro(s) pendientes subidos a Firebase (#${hash}).`
+          : `Todos los dispositivos están sincronizados con Firebase (#${hash}).`,
+      );
     } catch (err) {
       console.error('Error al sincronizar lote:', err);
       setStorageError('No se pudo confirmar el lote de sincronización en la nube.');
@@ -645,6 +1225,7 @@ export function useCblsStore() {
     species,
     sightings,
     pendingSyncCount,
+    syncOfflineOutboxToFirebase,
     appendCloudChangeLog,
   ]);
 
@@ -678,13 +1259,11 @@ export function useCblsStore() {
           )
           .map((si) => toFirestoreSightingPayload(si));
 
-        // Clear existing cloud docs first in chunks
         const deleteBatch = writeBatch(db);
         species.forEach((sp) => deleteBatch.delete(doc(db, 'species', sp.id)));
         sightings.forEach((si) => deleteBatch.delete(doc(db, 'sightings', si.id)));
         await deleteBatch.commit();
 
-        // Write species first so Firestore rule exists(/species/{speciesId}) holds for sightings
         for (let i = 0; i < cleanSpecies.length; i += 400) {
           const batch = writeBatch(db);
           cleanSpecies.slice(i, i + 400).forEach((sp) => {
@@ -766,7 +1345,7 @@ export function useCblsStore() {
       corridor: 'Corredor Biológico Los Santos, Costa Rica',
       exportedAt: new Date().toISOString(),
       checksum,
-      version: 2,
+      version: 3,
       species,
       sightings,
       syncLogs,
@@ -780,6 +1359,9 @@ export function useCblsStore() {
     sightings,
     syncLogs,
     changeLogs,
+    outboxCount: outboxItems.length,
+    localMediaStats,
+    isAutoSyncing,
     userSession,
     saveUserSession,
     offlineAutonomousMode,
@@ -801,6 +1383,7 @@ export function useCblsStore() {
     addSighting,
     deleteSpecies,
     syncPendingRecords,
+    syncOfflineOutboxToFirebase,
     importBackupJson,
     resetAllDataToZero,
     exportBackupObject,

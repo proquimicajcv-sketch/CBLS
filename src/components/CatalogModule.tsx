@@ -24,6 +24,7 @@ import {
   playBioacousticPreview,
   TAXON_GROUPS,
 } from '../utils/ecology';
+import { idbGetMediaCapture } from '../utils/indexedDb';
 import { AdminPinModal } from './AdminPinModal';
 import {
   Button,
@@ -546,6 +547,12 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                           Fuente / cámara: {speciesSightings[0].sourceDetail}
                         </p>
                       )}
+                      {speciesSightings[0].notes && (
+                        <p className="text-foreground/90">
+                          Notas de campo: {speciesSightings[0].notes}
+                        </p>
+                      )}
+                      <LocalSightingMediaPreview sighting={speciesSightings[0]} />
                       <p>
                         Total en campo: {speciesSightings.length} avist. ({speciesTotalIndividuals} ind.)
                       </p>
@@ -1275,6 +1282,81 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
           </Surface>
         )}
       </div>
+    </div>
+  );
+};
+
+const LocalSightingMediaPreview: React.FC<{ sighting: SightingEntry }> = ({
+  sighting,
+}) => {
+  const [photoSrc, setPhotoSrc] = useState<string | null>(sighting.photoUrl || null);
+  const [videoSrc, setVideoSrc] = useState<string | null>(sighting.videoUrl || null);
+
+  useEffect(() => {
+    let active = true;
+    const urlsToRevoke: string[] = [];
+
+    setPhotoSrc(sighting.photoUrl || null);
+    setVideoSrc(sighting.videoUrl || null);
+
+    if (sighting.localPhotoId && !sighting.photoUrl) {
+      void idbGetMediaCapture(sighting.localPhotoId).then((cap) => {
+        if (!active || !cap) return;
+        const objUrl = URL.createObjectURL(cap.blob);
+        urlsToRevoke.push(objUrl);
+        setPhotoSrc(objUrl);
+      });
+    }
+    if (sighting.localVideoId && !sighting.videoUrl) {
+      void idbGetMediaCapture(sighting.localVideoId).then((cap) => {
+        if (!active || !cap) return;
+        const objUrl = URL.createObjectURL(cap.blob);
+        urlsToRevoke.push(objUrl);
+        setVideoSrc(objUrl);
+      });
+    }
+
+    return () => {
+      active = false;
+      urlsToRevoke.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [
+    sighting.id,
+    sighting.photoUrl,
+    sighting.videoUrl,
+    sighting.localPhotoId,
+    sighting.localVideoId,
+  ]);
+
+  if (!photoSrc && !videoSrc && !sighting.localMediaSummary) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2 pt-1">
+      {sighting.localMediaSummary && (
+        <p className="font-mono text-[11px] text-secondary">
+          Evidencia capturada: {sighting.localMediaSummary}
+        </p>
+      )}
+      {(photoSrc || videoSrc) && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {photoSrc && (
+            <img
+              src={photoSrc}
+              alt="Evidencia fotográfica del avistamiento"
+              className="h-28 w-full rounded-md border border-border object-cover"
+            />
+          )}
+          {videoSrc && (
+            <video
+              src={videoSrc}
+              controls
+              className="h-28 w-full rounded-md border border-border bg-black object-cover"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 };

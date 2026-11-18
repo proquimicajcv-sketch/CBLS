@@ -300,6 +300,52 @@ export default function App() {
           </header>
         )}
 
+        {/* Non-Intrusive Offline Mountain Field Banner & Auto-Sync Status */}
+        {(store.effectiveOffline || store.isAutoSyncing || store.outboxCount > 0) && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`border-b px-4 py-2 text-xs sm:px-6 ${
+              store.effectiveOffline
+                ? 'border-coral/40 bg-[#1B0D0B] text-foreground'
+                : 'border-primary/40 bg-[#061D14] text-foreground'
+            }`}
+          >
+            <div className="mx-auto flex max-w-[90rem] flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {store.effectiveOffline ? (
+                  <WifiOff className="h-3.5 w-3.5 shrink-0 text-coral" />
+                ) : (
+                  <Wifi className="h-3.5 w-3.5 shrink-0 animate-pulse text-primary" />
+                )}
+                <span>
+                  {store.effectiveOffline
+                    ? 'Modo Offline (Sin señal): los avistamientos, notas, GPS y fotos/videos se guardan localmente en IndexedDB.'
+                    : store.isAutoSyncing
+                      ? `Conexión recuperada: sincronizando ${store.outboxCount} registro(s) con Firebase...`
+                      : `${store.outboxCount} registro(s) pendientes de subir a Firebase.`}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 font-mono text-[11px]">
+                {store.localMediaStats.count > 0 && (
+                  <span className="text-secondary">
+                    {store.localMediaStats.count} media local
+                  </span>
+                )}
+                {!store.effectiveOffline && !store.isAutoSyncing && store.outboxCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void store.syncPendingRecords()}
+                    className="rounded border border-primary/40 bg-primary/15 px-2.5 py-0.5 font-semibold text-primary hover:bg-primary/25"
+                  >
+                    Sincronizar ahora
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Inline Feedback / Storage Banner */}
         {(store.storageError || store.statusMessage) && (
           <div
@@ -408,6 +454,9 @@ export default function App() {
               offlineAutonomousMode={store.offlineAutonomousMode}
               effectiveOffline={store.effectiveOffline}
               wsConnected={store.wsConnected}
+              isAutoSyncing={store.isAutoSyncing}
+              outboxCount={store.outboxCount}
+              localMediaStats={store.localMediaStats}
               lastSavedIso={store.lastSavedIso}
               pendingSyncCount={store.pendingSyncCount}
               checksum={store.checksum}

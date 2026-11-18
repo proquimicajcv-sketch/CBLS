@@ -104,12 +104,44 @@ export interface SightingEntry {
   locality: string;
   holdridgeZone: HoldridgeZoneId;
   microhabitat: string;
+  notes?: string;
   weatherCondition: 'Despejado' | 'Neblina montana' | 'Lluvia ligera' | 'Noche húmeda';
   photoUrl?: string; // URL of sighting photo
   videoUrl?: string; // URL of sighting video
   audioUrl?: string; // URL of sighting audio / call
+  localPhotoId?: string;
+  localVideoId?: string;
+  localMediaSummary?: string;
   synced: boolean;
   createdAt: string;
+}
+
+export interface LocalMediaCapture {
+  id: string;
+  sightingId: string;
+  kind: 'photo' | 'video';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  blob: Blob;
+  createdAt: string;
+  uploadedUrl?: string;
+}
+
+export type OfflineOutboxKind =
+  | 'species_upsert'
+  | 'species_delete'
+  | 'sighting_create'
+  | 'changelog_create';
+
+export interface OfflineOutboxItem {
+  id: string;
+  kind: OfflineOutboxKind;
+  entityId: string;
+  payload: unknown;
+  createdAt: string;
+  retries: number;
+  lastError?: string;
 }
 
 export interface UserSession {

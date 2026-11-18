@@ -148,10 +148,14 @@ service cloud.firestore {
           'locality',
           'holdridgeZone',
           'microhabitat',
+          'notes',
           'weatherCondition',
           'photoUrl',
           'videoUrl',
           'audioUrl',
+          'localPhotoId',
+          'localVideoId',
+          'localMediaSummary',
           'synced',
           'createdAt'
         ])
@@ -170,10 +174,14 @@ service cloud.firestore {
         && data.locality is string && data.locality.size() >= 1 && data.locality.size() <= 240
         && data.holdridgeZone in ['bmh-P', 'bmh-MB', 'bp-MB', 'bp-M', 'pp-SA']
         && data.microhabitat is string && data.microhabitat.size() <= 400
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
         && data.weatherCondition in ['Despejado', 'Neblina montana', 'Lluvia ligera', 'Noche húmeda']
         && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 2000))
         && (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() <= 2000))
         && (!('audioUrl' in data) || (data.audioUrl is string && data.audioUrl.size() <= 2000))
+        && (!('localPhotoId' in data) || isValidId(data.localPhotoId))
+        && (!('localVideoId' in data) || isValidId(data.localVideoId))
+        && (!('localMediaSummary' in data) || (data.localMediaSummary is string && data.localMediaSummary.size() <= 300))
         && data.synced is bool
         && data.createdAt is string && data.createdAt.size() <= 64;
     }
@@ -257,10 +265,14 @@ service cloud.firestore {
           'locality',
           'holdridgeZone',
           'microhabitat',
+          'notes',
           'weatherCondition',
           'photoUrl',
           'videoUrl',
           'audioUrl',
+          'localPhotoId',
+          'localVideoId',
+          'localMediaSummary',
           'synced'
         ]);
       allow delete: if isValidId(sightingId);

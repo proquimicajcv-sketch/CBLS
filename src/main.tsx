@@ -2,6 +2,7 @@ import React, { Component, type ErrorInfo, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { registerServiceWorker } from './utils/registerSw';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -69,6 +70,8 @@ console.error = (...args: unknown[]) => {
     window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
   }
 };
+
+registerServiceWorker();
 
 createRoot(document.getElementById('root')!).render(
   <AppErrorBoundary>

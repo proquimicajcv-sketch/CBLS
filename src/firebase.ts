@@ -7,9 +7,11 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
 } from 'firebase/firestore';
+import { getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 import type {
   ChangeLogEntry,
+  LocalMediaCapture,
   SightingEntry,
   SpeciesRecord,
   SyncBatchLog,
@@ -28,6 +30,9 @@ export const db = initializeFirestore(
 );
 
 export const auth = getAuth(app);
+export const storage = getStorage(app);
+storage.maxUploadRetryTime = 5000;
+storage.maxOperationRetryTime = 5000;
 
 export enum OperationType {
   CREATE = 'create',
@@ -201,6 +206,9 @@ export function toFirestoreSightingPayload(raw: SightingEntry): SightingEntry {
   if (typeof raw.sourceDetail === 'string' && raw.sourceDetail.trim()) {
     payload.sourceDetail = raw.sourceDetail.trim().slice(0, 300);
   }
+  if (typeof raw.notes === 'string' && raw.notes.trim()) {
+    payload.notes = raw.notes.trim().slice(0, 2000);
+  }
   if (typeof raw.photoUrl === 'string' && raw.photoUrl.trim()) {
     payload.photoUrl = raw.photoUrl.trim().slice(0, 2000);
   }
@@ -210,8 +218,39 @@ export function toFirestoreSightingPayload(raw: SightingEntry): SightingEntry {
   if (typeof raw.audioUrl === 'string' && raw.audioUrl.trim()) {
     payload.audioUrl = raw.audioUrl.trim().slice(0, 2000);
   }
+  if (typeof raw.localPhotoId === 'string' && raw.localPhotoId.trim()) {
+    payload.localPhotoId = sanitizeFirestoreId(raw.localPhotoId, 'img');
+  }
+  if (typeof raw.localVideoId === 'string' && raw.localVideoId.trim()) {
+    payload.localVideoId = sanitizeFirestoreId(raw.localVideoId, 'vid');
+  }
+  if (typeof raw.localMediaSummary === 'string' && raw.localMediaSummary.trim()) {
+    payload.localMediaSummary = raw.localMediaSummary.trim().slice(0, 300);
+  }
 
   return payload;
+}
+
+export async function uploadSightingMediaCapture(
+  capture: LocalMediaCapture,
+): Promise<string | null> {
+  if (capture.uploadedUrl) return capture.uploadedUrl;
+  try {
+    const safeName = capture.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storageRef = ref(
+      storage,
+      `cbls-sightings/${capture.sightingId}/${capture.id}_${safeName}`,
+    );
+    const snapshot = await uploadBytes(storageRef, capture.blob, {
+      contentType: capture.mimeType || 'application/octet-stream',
+    });
+    const url = await getDownloadURL(snapshot.ref);
+    return url;
+  } catch {
+    // Firebase Storage bucket may not allow unauthenticated uploads;
+    // keep binary media safely stored in IndexedDB without blocking Firestore text/GPS sync.
+    return null;
+  }
 }
 
 export function toFirestoreChangeLogPayload(raw: ChangeLogEntry): ChangeLogEntry {

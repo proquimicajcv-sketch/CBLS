@@ -1,5 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Compass, Eye, Headphones, MapPin, Search, Users, Video, X } from 'lucide-react';
+import {
+  Camera,
+  Compass,
+  Eye,
+  Headphones,
+  ImagePlus,
+  MapPin,
+  Search,
+  Trash2,
+  Users,
+  Video,
+  X,
+} from 'lucide-react';
+import type { SightingMediaInput } from '../hooks/useCblsStore';
 import type {
   HoldridgeZoneId,
   SightingEntry,
@@ -12,7 +25,14 @@ import {
   estimateCblsElevationFromCoords,
   HOLDRIDGE_ZONES,
 } from '../utils/ecology';
-import { Button, Field, inputClassName, StepperInput, Surface } from './ui';
+import {
+  Button,
+  Field,
+  inputClassName,
+  StepperInput,
+  Surface,
+  textareaClassName,
+} from './ui';
 
 interface SightingModalProps {
   open: boolean;
@@ -28,7 +48,17 @@ interface SightingModalProps {
   currentUser: UserSession | null;
   onRequestUserSession: () => void;
   onClose: () => void;
-  onSave: (entry: Omit<SightingEntry, 'id' | 'occurrenceId' | 'synced' | 'createdAt'>) => void;
+  onSave: (
+    entry: Omit<SightingEntry, 'id' | 'occurrenceId' | 'synced' | 'createdAt'>,
+    mediaInput?: SightingMediaInput,
+  ) => Promise<void> | void;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export const SightingModal: React.FC<SightingModalProps> = ({
@@ -79,10 +109,17 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   const [microhabitat, setMicrohabitat] = useState<string>(
     'Sotobosque húmedo sobre vegetación epífita',
   );
+  const [notes, setNotes] = useState<string>('');
   const [weatherCondition, setWeatherCondition] =
     useState<SightingEntry['weatherCondition']>('Neblina montana');
 
-  // Media URLs
+  // Local offline-captured Photo & Video files (saved as Blobs in IndexedDB)
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+
+  // Optional Media URLs
   const [photoUrl, setPhotoUrl] = useState<string>('');
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [audioUrl, setAudioUrl] = useState<string>('');
@@ -105,9 +142,27 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
+    const now = new Date();
+    setObservedDate(now.toISOString().slice(0, 10));
+    setObservedTime(now.toTimeString().slice(0, 5));
     setSpeciesSearch('');
     setObservationMethod('En persona');
     setSourceDetail('');
+    setNotes('');
+    setPhotoUrl('');
+    setVideoUrl('');
+    setAudioUrl('');
+    setPhotoFile(null);
+    setVideoFile(null);
+    setPhotoPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setVideoPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+
     const sp = speciesList.find((s) => s.id === initialSpeciesId) ?? speciesList[0];
     if (sp) {
       setSpeciesId(sp.id);
@@ -125,6 +180,13 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   }, [open, initialSpeciesId, presetCoords, speciesList]);
 
   useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+      if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
+    };
+  }, [photoPreviewUrl, videoPreviewUrl]);
+
+  useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -135,8 +197,26 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
   if (!open) return null;
 
+  const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoFile(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+    e.target.value = '';
+  };
+
+  const handleVideoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
+    setVideoFile(file);
+    setVideoPreviewUrl(URL.createObjectURL(file));
+    e.target.value = '';
+  };
+
   const handleCaptureGps = () => {
-    setGpsStatus('Consultando satélites WGS84...');
+    setGpsStatus('Consultando satélites WGS84 (funciona sin señal celular)...');
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -160,12 +240,14 @@ export const SightingModal: React.FC<SightingModalProps> = ({
           setLongitude(lon);
           setElevationM(alt);
           setHoldridgeZone(detectHoldridgeZoneByElevation(alt));
-          setLocality('Estación Biológica Río Savegre, Dota');
+          if (!locality.trim()) {
+            setLocality('Estación Biológica Río Savegre, Dota');
+          }
           setGpsStatus(
             'Referencia estación CBLS (9.5512° N, -83.8074° W · 2 240 m s.n.m.).',
           );
         },
-        { timeout: 3500 },
+        { enableHighAccuracy: true, timeout: 5000 },
       );
     }
   };
@@ -183,25 +265,32 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     }
     if (!speciesId) return;
 
-    onSave({
-      speciesId,
-      individualCount,
-      observationMethod,
-      sourceDetail: sourceDetail.trim() || undefined,
-      observedDate,
-      observedTime,
-      observer: currentUser.observerName,
-      latitude,
-      longitude,
-      elevationM,
-      locality: locality.trim() || 'Sector Corredor Biológico Los Santos',
-      holdridgeZone,
-      microhabitat: microhabitat.trim() || 'Observación directa en transecto',
-      weatherCondition,
-      photoUrl: photoUrl.trim() || undefined,
-      videoUrl: videoUrl.trim() || undefined,
-      audioUrl: audioUrl.trim() || undefined,
-    });
+    void onSave(
+      {
+        speciesId,
+        individualCount,
+        observationMethod,
+        sourceDetail: sourceDetail.trim() || undefined,
+        observedDate,
+        observedTime,
+        observer: currentUser.observerName,
+        latitude,
+        longitude,
+        elevationM,
+        locality: locality.trim() || 'Sector Corredor Biológico Los Santos',
+        holdridgeZone,
+        microhabitat: microhabitat.trim() || 'Observación directa en transecto',
+        notes: notes.trim() || undefined,
+        weatherCondition,
+        photoUrl: photoUrl.trim() || undefined,
+        videoUrl: videoUrl.trim() || undefined,
+        audioUrl: audioUrl.trim() || undefined,
+      },
+      {
+        photoFile,
+        videoFile,
+      },
+    );
     onClose();
   };
 
@@ -440,14 +529,139 @@ export const SightingModal: React.FC<SightingModalProps> = ({
             </Field>
           </div>
 
-          {/* Media Links by URL: Photos, Videos, Audios/Calls */}
+          {/* Local Offline Camera / Video Capture + Optional URLs */}
           <div className="space-y-3 border-t border-border pt-4">
-            <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-              Evidencia Multimedia por URL
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-foreground">
+                Captura de Fotos y Videos (100% offline en IndexedDB)
+              </span>
+              <span className="font-mono text-[11px] text-secondary">
+                Guardado local sin señal
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {/* Local Photo Capture / Picker */}
+              <div className="space-y-2 rounded-control border border-border bg-input/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-foreground">
+                    Fotografía de campo
+                  </span>
+                  {photoFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+                        setPhotoFile(null);
+                        setPhotoPreviewUrl(null);
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] text-coral hover:underline"
+                    >
+                      <Trash2 className="h-3 w-3" /> Quitar
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <label className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-control border border-primary/40 bg-primary/15 px-3 text-xs font-semibold text-primary hover:bg-primary/25">
+                    <Camera className="h-3.5 w-3.5" />
+                    Tomar foto
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handlePhotoFileChange}
+                      className="sr-only"
+                    />
+                  </label>
+                  <label className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-control border border-border bg-surface px-3 text-xs font-medium text-foreground hover:border-foreground/40">
+                    <ImagePlus className="h-3.5 w-3.5 text-secondary" />
+                    Galería
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePhotoFileChange}
+                      className="sr-only"
+                    />
+                  </label>
+                </div>
+
+                {photoPreviewUrl && photoFile && (
+                  <div className="space-y-1.5 pt-1">
+                    <img
+                      src={photoPreviewUrl}
+                      alt="Vista previa de fotografía capturada"
+                      className="h-28 w-full rounded-md border border-border object-cover"
+                    />
+                    <p className="truncate font-mono text-[11px] text-secondary">
+                      {photoFile.name} · {formatSize(photoFile.size)}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Local Video Capture / Picker */}
+              <div className="space-y-2 rounded-control border border-border bg-input/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-foreground">
+                    Video de campo
+                  </span>
+                  {videoFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
+                        setVideoFile(null);
+                        setVideoPreviewUrl(null);
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] text-coral hover:underline"
+                    >
+                      <Trash2 className="h-3 w-3" /> Quitar
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <label className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-control border border-primary/40 bg-primary/15 px-3 text-xs font-semibold text-primary hover:bg-primary/25">
+                    <Video className="h-3.5 w-3.5" />
+                    Grabar video
+                    <input
+                      type="file"
+                      accept="video/*"
+                      capture="environment"
+                      onChange={handleVideoFileChange}
+                      className="sr-only"
+                    />
+                  </label>
+                  <label className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-control border border-border bg-surface px-3 text-xs font-medium text-foreground hover:border-foreground/40">
+                    <Video className="h-3.5 w-3.5 text-secondary" />
+                    Archivo
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={handleVideoFileChange}
+                      className="sr-only"
+                    />
+                  </label>
+                </div>
+
+                {videoPreviewUrl && videoFile && (
+                  <div className="space-y-1.5 pt-1">
+                    <video
+                      src={videoPreviewUrl}
+                      controls
+                      className="h-28 w-full rounded-md border border-border bg-black object-cover"
+                    />
+                    <p className="truncate font-mono text-[11px] text-secondary">
+                      {videoFile.name} · {formatSize(videoFile.size)}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <Field label="Foto (URL)" htmlFor="obs-photo-url">
+              <Field label="Foto externa (URL opcional)" htmlFor="obs-photo-url">
                 <div className="relative">
                   <input
                     id="obs-photo-url"
@@ -461,7 +675,7 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                 </div>
               </Field>
 
-              <Field label="Video (URL)" htmlFor="obs-video-url">
+              <Field label="Video externo (URL opcional)" htmlFor="obs-video-url">
                 <div className="relative">
                   <input
                     id="obs-video-url"
@@ -475,7 +689,7 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                 </div>
               </Field>
 
-              <Field label="Audio / Canto (URL)" htmlFor="obs-audio-url">
+              <Field label="Audio / Canto (URL opcional)" htmlFor="obs-audio-url">
                 <div className="relative">
                   <input
                     id="obs-audio-url"
@@ -592,6 +806,22 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                   value={microhabitat}
                   onChange={(e) => setMicrohabitat(e.target.value)}
                   className={inputClassName}
+                />
+              </Field>
+
+              <Field
+                label="Notas y observaciones de campo"
+                hint="Comportamiento, huellas, clima, vocalización u otros detalles"
+                htmlFor="obs-notes"
+                className="sm:col-span-2"
+              >
+                <textarea
+                  id="obs-notes"
+                  rows={3}
+                  placeholder="Ej. Individuo adulto desplazándose por sendero húmedo a las 06:15, huellas frescas hacia quebrada..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className={textareaClassName}
                 />
               </Field>
             </div>

@@ -1,13 +1,22 @@
-import type { ChangeLogEntry, SightingEntry, SpeciesRecord, SyncBatchLog } from '../types/cbls';
+import type {
+  ChangeLogEntry,
+  LocalMediaCapture,
+  OfflineOutboxItem,
+  SightingEntry,
+  SpeciesRecord,
+  SyncBatchLog,
+} from '../types/cbls';
 
 const DB_NAME = 'bitacora_cbls_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORE_SPECIES = 'species';
 const STORE_SIGHTINGS = 'sightings';
 const STORE_SYNCLOGS = 'synclogs';
 const STORE_META = 'metadata';
 const STORE_CHANGELOGS = 'changelogs';
+const STORE_MEDIA_CAPTURES = 'media_captures';
+const STORE_OFFLINE_OUTBOX = 'offline_outbox';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -39,6 +48,17 @@ function openDatabase(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains(STORE_CHANGELOGS)) {
         db.createObjectStore(STORE_CHANGELOGS, { keyPath: 'id' });
+      }
+
+      if (!db.objectStoreNames.contains(STORE_MEDIA_CAPTURES)) {
+        const mediaStore = db.createObjectStore(STORE_MEDIA_CAPTURES, {
+          keyPath: 'id',
+        });
+        mediaStore.createIndex('by_sightingId', 'sightingId', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(STORE_OFFLINE_OUTBOX)) {
+        db.createObjectStore(STORE_OFFLINE_OUTBOX, { keyPath: 'id' });
       }
     };
 
@@ -72,20 +92,37 @@ export async function idbSaveSpecies(record: SpeciesRecord): Promise<void> {
 export async function idbDeleteSpecies(id: string): Promise<void> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction([STORE_SPECIES, STORE_SIGHTINGS], 'readwrite');
+    const tx = db.transaction(
+      [STORE_SPECIES, STORE_SIGHTINGS, STORE_MEDIA_CAPTURES],
+      'readwrite',
+    );
     const spStore = tx.objectStore(STORE_SPECIES);
     spStore.delete(id);
 
-    // Also delete or orphan sightings of this species
     const siStore = tx.objectStore(STORE_SIGHTINGS);
+    const mediaStore = tx.objectStore(STORE_MEDIA_CAPTURES);
     const req = siStore.getAll();
     req.onsuccess = () => {
       const sightings = req.result as SightingEntry[];
+      const deletedSightingIds = new Set<string>();
       sightings.forEach((s) => {
         if (s.speciesId === id) {
+          deletedSightingIds.add(s.id);
           siStore.delete(s.id);
         }
       });
+
+      if (deletedSightingIds.size > 0) {
+        const mediaReq = mediaStore.getAll();
+        mediaReq.onsuccess = () => {
+          const captures = (mediaReq.result || []) as LocalMediaCapture[];
+          captures.forEach((c) => {
+            if (deletedSightingIds.has(c.sightingId)) {
+              mediaStore.delete(c.id);
+            }
+          });
+        };
+      }
     };
 
     tx.oncomplete = () => resolve();
@@ -174,17 +211,136 @@ export async function idbSaveChangeLog(entry: ChangeLogEntry): Promise<void> {
   });
 }
 
+// Local Photo / Video Blob Storage (100% Offline in Mountain Fieldwork)
+export async function idbSaveMediaCapture(
+  capture: LocalMediaCapture,
+): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIA_CAPTURES, 'readwrite');
+    const store = tx.objectStore(STORE_MEDIA_CAPTURES);
+    const req = store.put(capture);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function idbGetMediaCapture(
+  id: string,
+): Promise<LocalMediaCapture | undefined> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIA_CAPTURES, 'readonly');
+    const store = tx.objectStore(STORE_MEDIA_CAPTURES);
+    const req = store.get(id);
+    req.onsuccess = () => resolve(req.result as LocalMediaCapture | undefined);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function idbGetAllMediaCaptures(): Promise<LocalMediaCapture[]> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIA_CAPTURES, 'readonly');
+    const store = tx.objectStore(STORE_MEDIA_CAPTURES);
+    const req = store.getAll();
+    req.onsuccess = () => resolve((req.result || []) as LocalMediaCapture[]);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function idbGetMediaBySighting(
+  sightingId: string,
+): Promise<LocalMediaCapture[]> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIA_CAPTURES, 'readonly');
+    const store = tx.objectStore(STORE_MEDIA_CAPTURES);
+    if (store.indexNames.contains('by_sightingId')) {
+      const idx = store.index('by_sightingId');
+      const req = idx.getAll(sightingId);
+      req.onsuccess = () => resolve((req.result || []) as LocalMediaCapture[]);
+      req.onerror = () => reject(req.error);
+    } else {
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const all = (req.result || []) as LocalMediaCapture[];
+        resolve(all.filter((item) => item.sightingId === sightingId));
+      };
+      req.onerror = () => reject(req.error);
+    }
+  });
+}
+
+export async function idbUpdateMediaUploadedUrl(
+  captureId: string,
+  uploadedUrl: string,
+): Promise<void> {
+  const existing = await idbGetMediaCapture(captureId);
+  if (!existing) return;
+  await idbSaveMediaCapture({ ...existing, uploadedUrl });
+}
+
+// Offline Sync Outbox Queue (Auto-flushes to Firebase on reconnection)
+export async function idbEnqueueOutboxItem(
+  item: OfflineOutboxItem,
+): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_OFFLINE_OUTBOX, 'readwrite');
+    const store = tx.objectStore(STORE_OFFLINE_OUTBOX);
+    const req = store.put(item);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function idbGetAllOutboxItems(): Promise<OfflineOutboxItem[]> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_OFFLINE_OUTBOX, 'readonly');
+    const store = tx.objectStore(STORE_OFFLINE_OUTBOX);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const items = (req.result || []) as OfflineOutboxItem[];
+      items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      resolve(items);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function idbRemoveOutboxItem(id: string): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_OFFLINE_OUTBOX, 'readwrite');
+    const store = tx.objectStore(STORE_OFFLINE_OUTBOX);
+    const req = store.delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
 export async function idbClearAll(): Promise<void> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(
-      [STORE_SPECIES, STORE_SIGHTINGS, STORE_SYNCLOGS, STORE_CHANGELOGS],
+      [
+        STORE_SPECIES,
+        STORE_SIGHTINGS,
+        STORE_SYNCLOGS,
+        STORE_CHANGELOGS,
+        STORE_MEDIA_CAPTURES,
+        STORE_OFFLINE_OUTBOX,
+      ],
       'readwrite',
     );
     tx.objectStore(STORE_SPECIES).clear();
     tx.objectStore(STORE_SIGHTINGS).clear();
     tx.objectStore(STORE_SYNCLOGS).clear();
     tx.objectStore(STORE_CHANGELOGS).clear();
+    tx.objectStore(STORE_MEDIA_CAPTURES).clear();
+    tx.objectStore(STORE_OFFLINE_OUTBOX).clear();
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });

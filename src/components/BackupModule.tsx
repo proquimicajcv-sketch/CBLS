@@ -34,6 +34,9 @@ interface BackupModuleProps {
   offlineAutonomousMode: boolean;
   effectiveOffline: boolean;
   wsConnected: boolean;
+  isAutoSyncing?: boolean;
+  outboxCount?: number;
+  localMediaStats?: { count: number; totalBytes: number };
   lastSavedIso: string;
   pendingSyncCount: number;
   checksum: string;
@@ -55,6 +58,9 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
   offlineAutonomousMode,
   effectiveOffline,
   wsConnected,
+  isAutoSyncing = false,
+  outboxCount = 0,
+  localMediaStats = { count: 0, totalBytes: 0 },
   lastSavedIso,
   pendingSyncCount,
   checksum,
@@ -183,11 +189,13 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
 
             <Button
               tone="primary"
-              disabled={effectiveOffline || pendingSyncCount === 0}
+              disabled={effectiveOffline || isAutoSyncing}
               onClick={onSyncNow}
             >
               <CloudUpload className="h-4 w-4" />
-              Sincronizar ahora ({pendingSyncCount})
+              {isAutoSyncing
+                ? 'Sincronizando...'
+                : `Sincronizar ahora (${Math.max(pendingSyncCount, outboxCount)})`}
             </Button>
           </div>
         </div>
@@ -199,21 +207,21 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
               {kbUsed} KB
             </p>
             <p className="mt-0.5 text-xs text-muted">
-              {species.length} especies · {sightings.length} avist.
+              {species.length} especies · {sightings.length} avist. · {localMediaStats.count} fotos/videos
             </p>
           </div>
 
           <div className="p-4">
-            <p className="text-xs text-muted">Cola de sincronización</p>
+            <p className="text-xs text-muted">Cola offline (Auto-Sync)</p>
             <p
               className={`mt-1 font-mono text-xl font-semibold ${
-                pendingSyncCount > 0 ? 'text-coral' : 'text-secondary'
+                Math.max(pendingSyncCount, outboxCount) > 0 ? 'text-coral' : 'text-secondary'
               }`}
             >
-              {pendingSyncCount} reg.
+              {Math.max(pendingSyncCount, outboxCount)} reg.
             </p>
             <p className="mt-0.5 text-xs text-muted">
-              Pendientes de confirmación en servidor
+              Se suben a Firebase automáticamente al recuperar señal
             </p>
           </div>
 
