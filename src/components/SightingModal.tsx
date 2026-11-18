@@ -25,6 +25,7 @@ import {
   estimateCblsElevationFromCoords,
   HOLDRIDGE_ZONES,
 } from '../utils/ecology';
+import { idbGetMediaCapture } from '../utils/indexedDb';
 import {
   Button,
   Field,
@@ -38,6 +39,7 @@ interface SightingModalProps {
   open: boolean;
   speciesList: SpeciesRecord[];
   initialSpeciesId?: string;
+  editingSighting?: SightingEntry | null;
   presetCoords?: {
     latitude: number;
     longitude: number;
@@ -65,6 +67,7 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   open,
   speciesList,
   initialSpeciesId,
+  editingSighting,
   presetCoords,
   currentUser,
   onRequestUserSession,
@@ -72,9 +75,11 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   onSave,
 }) => {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const isEditing = Boolean(editingSighting);
 
   const defaultSp =
-    speciesList.find((s) => s.id === initialSpeciesId) ?? speciesList[0];
+    speciesList.find((s) => s.id === (editingSighting?.speciesId ?? initialSpeciesId)) ??
+    speciesList[0];
 
   const [speciesId, setSpeciesId] = useState<string>(defaultSp?.id ?? '');
   const [speciesSearch, setSpeciesSearch] = useState<string>('');
@@ -82,6 +87,9 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   const [observationMethod, setObservationMethod] =
     useState<SightingObservationMethod>('En persona');
   const [sourceDetail, setSourceDetail] = useState<string>('');
+  const [observerName, setObserverName] = useState<string>(
+    editingSighting?.observer || currentUser?.observerName || '',
+  );
   const [observedDate, setObservedDate] = useState<string>(() => {
     const d = new Date();
     return d.toISOString().slice(0, 10);
@@ -118,6 +126,10 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [existingLocalPhotoPreview, setExistingLocalPhotoPreview] = useState<string | null>(null);
+  const [existingLocalVideoPreview, setExistingLocalVideoPreview] = useState<string | null>(null);
+  const [removeExistingPhoto, setRemoveExistingPhoto] = useState<boolean>(false);
+  const [removeExistingVideo, setRemoveExistingVideo] = useState<boolean>(false);
 
   // Optional Media URLs
   const [photoUrl, setPhotoUrl] = useState<string>('');
@@ -142,16 +154,7 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    const now = new Date();
-    setObservedDate(now.toISOString().slice(0, 10));
-    setObservedTime(now.toTimeString().slice(0, 5));
-    setSpeciesSearch('');
-    setObservationMethod('En persona');
-    setSourceDetail('');
-    setNotes('');
-    setPhotoUrl('');
-    setVideoUrl('');
-    setAudioUrl('');
+
     setPhotoFile(null);
     setVideoFile(null);
     setPhotoPreviewUrl((prev) => {
@@ -162,6 +165,76 @@ export const SightingModal: React.FC<SightingModalProps> = ({
       if (prev) URL.revokeObjectURL(prev);
       return null;
     });
+    setExistingLocalPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setExistingLocalVideoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setRemoveExistingPhoto(false);
+    setRemoveExistingVideo(false);
+    setSpeciesSearch('');
+    setGpsStatus(null);
+
+    if (editingSighting) {
+      setSpeciesId(editingSighting.speciesId);
+      setIndividualCount(editingSighting.individualCount);
+      setObservationMethod(editingSighting.observationMethod || 'En persona');
+      setSourceDetail(editingSighting.sourceDetail || '');
+      setObserverName(editingSighting.observer || currentUser?.observerName || '');
+      setObservedDate(editingSighting.observedDate);
+      setObservedTime(editingSighting.observedTime);
+      setLatitude(editingSighting.latitude);
+      setLongitude(editingSighting.longitude);
+      setElevationM(editingSighting.elevationM);
+      setHoldridgeZone(editingSighting.holdridgeZone);
+      setLocality(editingSighting.locality);
+      setMicrohabitat(editingSighting.microhabitat);
+      setNotes(editingSighting.notes || '');
+      setWeatherCondition(editingSighting.weatherCondition);
+      setPhotoUrl(editingSighting.photoUrl || '');
+      setVideoUrl(editingSighting.videoUrl || '');
+      setAudioUrl(editingSighting.audioUrl || '');
+
+      let active = true;
+      const toRevoke: string[] = [];
+      if (editingSighting.localPhotoId) {
+        void idbGetMediaCapture(editingSighting.localPhotoId).then((cap) => {
+          if (!active || !cap) return;
+          const u = URL.createObjectURL(cap.blob);
+          toRevoke.push(u);
+          setExistingLocalPhotoPreview(u);
+        });
+      }
+      if (editingSighting.localVideoId) {
+        void idbGetMediaCapture(editingSighting.localVideoId).then((cap) => {
+          if (!active || !cap) return;
+          const u = URL.createObjectURL(cap.blob);
+          toRevoke.push(u);
+          setExistingLocalVideoPreview(u);
+        });
+      }
+      return () => {
+        active = false;
+        toRevoke.forEach((u) => URL.revokeObjectURL(u));
+      };
+    }
+
+    const now = new Date();
+    setIndividualCount(1);
+    setObservedDate(now.toISOString().slice(0, 10));
+    setObservedTime(now.toTimeString().slice(0, 5));
+    setObservationMethod('En persona');
+    setSourceDetail('');
+    setObserverName(currentUser?.observerName || '');
+    setMicrohabitat('Sotobosque húmedo sobre vegetación epífita');
+    setWeatherCondition('Neblina montana');
+    setNotes('');
+    setPhotoUrl('');
+    setVideoUrl('');
+    setAudioUrl('');
 
     const sp = speciesList.find((s) => s.id === initialSpeciesId) ?? speciesList[0];
     if (sp) {
@@ -175,9 +248,8 @@ export const SightingModal: React.FC<SightingModalProps> = ({
       setLocality(presetCoords.localityHint ?? '');
     } else {
       setLocality('');
-      setGpsStatus(null);
     }
-  }, [open, initialSpeciesId, presetCoords, speciesList]);
+  }, [open, editingSighting, initialSpeciesId, presetCoords, speciesList, currentUser]);
 
   useEffect(() => {
     return () => {
@@ -263,7 +335,15 @@ export const SightingModal: React.FC<SightingModalProps> = ({
       onRequestUserSession();
       return;
     }
+    if (isEditing && !currentUser.isAdmin) {
+      onRequestUserSession();
+      return;
+    }
     if (!speciesId) return;
+
+    const effectiveObserver = isEditing
+      ? observerName.trim() || editingSighting?.observer || currentUser.observerName
+      : currentUser.observerName;
 
     void onSave(
       {
@@ -273,7 +353,7 @@ export const SightingModal: React.FC<SightingModalProps> = ({
         sourceDetail: sourceDetail.trim() || undefined,
         observedDate,
         observedTime,
-        observer: currentUser.observerName,
+        observer: effectiveObserver,
         latitude,
         longitude,
         elevationM,
@@ -289,6 +369,8 @@ export const SightingModal: React.FC<SightingModalProps> = ({
       {
         photoFile,
         videoFile,
+        removeExistingPhoto,
+        removeExistingVideo,
       },
     );
     onClose();
@@ -312,10 +394,12 @@ export const SightingModal: React.FC<SightingModalProps> = ({
         <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
             <h2 id="sighting-dialog-title" className="text-lg font-semibold text-foreground">
-              Registrar avistamiento en campo
+              {isEditing
+                ? 'Editar avistamiento registrado'
+                : 'Registrar avistamiento en campo'}
             </h2>
             <p className="text-xs text-muted">
-              Brigadista registrado en el equipo:{' '}
+              {isEditing ? 'Editando como administrador:' : 'Brigadista registrado en el equipo:'}{' '}
               <span className="font-semibold text-primary">
                 {currentUser?.observerName || 'Sin identificar'}
               </span>
@@ -527,6 +611,23 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                 className={`${inputClassName} font-mono`}
               />
             </Field>
+
+            {isEditing && (
+              <Field
+                label="Brigadista responsable del registro"
+                htmlFor="obs-observer"
+                className="sm:col-span-2"
+              >
+                <input
+                  id="obs-observer"
+                  type="text"
+                  required
+                  value={observerName}
+                  onChange={(e) => setObserverName(e.target.value)}
+                  className={inputClassName}
+                />
+              </Field>
+            )}
           </div>
 
           {/* Local Offline Camera / Video Capture + Optional URLs */}
@@ -547,13 +648,16 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                   <span className="text-xs font-medium text-foreground">
                     Fotografía de campo
                   </span>
-                  {photoFile && (
+                  {(photoFile || (existingLocalPhotoPreview && !removeExistingPhoto)) && (
                     <button
                       type="button"
                       onClick={() => {
                         if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
                         setPhotoFile(null);
                         setPhotoPreviewUrl(null);
+                        if (existingLocalPhotoPreview) {
+                          setRemoveExistingPhoto(true);
+                        }
                       }}
                       className="inline-flex items-center gap-1 text-[11px] text-coral hover:underline"
                     >
@@ -570,7 +674,10 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                       type="file"
                       accept="image/*"
                       capture="environment"
-                      onChange={handlePhotoFileChange}
+                      onChange={(e) => {
+                        setRemoveExistingPhoto(false);
+                        handlePhotoFileChange(e);
+                      }}
                       className="sr-only"
                     />
                   </label>
@@ -580,13 +687,16 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={handlePhotoFileChange}
+                      onChange={(e) => {
+                        setRemoveExistingPhoto(false);
+                        handlePhotoFileChange(e);
+                      }}
                       className="sr-only"
                     />
                   </label>
                 </div>
 
-                {photoPreviewUrl && photoFile && (
+                {photoPreviewUrl && photoFile ? (
                   <div className="space-y-1.5 pt-1">
                     <img
                       src={photoPreviewUrl}
@@ -597,6 +707,20 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                       {photoFile.name} · {formatSize(photoFile.size)}
                     </p>
                   </div>
+                ) : (
+                  existingLocalPhotoPreview &&
+                  !removeExistingPhoto && (
+                    <div className="space-y-1.5 pt-1">
+                      <img
+                        src={existingLocalPhotoPreview}
+                        alt="Fotografía local guardada en este avistamiento"
+                        className="h-28 w-full rounded-md border border-border object-cover"
+                      />
+                      <p className="truncate font-mono text-[11px] text-secondary">
+                        Foto local guardada en el dispositivo
+                      </p>
+                    </div>
+                  )
                 )}
               </div>
 
@@ -606,13 +730,16 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                   <span className="text-xs font-medium text-foreground">
                     Video de campo
                   </span>
-                  {videoFile && (
+                  {(videoFile || (existingLocalVideoPreview && !removeExistingVideo)) && (
                     <button
                       type="button"
                       onClick={() => {
                         if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
                         setVideoFile(null);
                         setVideoPreviewUrl(null);
+                        if (existingLocalVideoPreview) {
+                          setRemoveExistingVideo(true);
+                        }
                       }}
                       className="inline-flex items-center gap-1 text-[11px] text-coral hover:underline"
                     >
@@ -629,7 +756,10 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                       type="file"
                       accept="video/*"
                       capture="environment"
-                      onChange={handleVideoFileChange}
+                      onChange={(e) => {
+                        setRemoveExistingVideo(false);
+                        handleVideoFileChange(e);
+                      }}
                       className="sr-only"
                     />
                   </label>
@@ -639,13 +769,16 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                     <input
                       type="file"
                       accept="video/*"
-                      onChange={handleVideoFileChange}
+                      onChange={(e) => {
+                        setRemoveExistingVideo(false);
+                        handleVideoFileChange(e);
+                      }}
                       className="sr-only"
                     />
                   </label>
                 </div>
 
-                {videoPreviewUrl && videoFile && (
+                {videoPreviewUrl && videoFile ? (
                   <div className="space-y-1.5 pt-1">
                     <video
                       src={videoPreviewUrl}
@@ -656,6 +789,20 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                       {videoFile.name} · {formatSize(videoFile.size)}
                     </p>
                   </div>
+                ) : (
+                  existingLocalVideoPreview &&
+                  !removeExistingVideo && (
+                    <div className="space-y-1.5 pt-1">
+                      <video
+                        src={existingLocalVideoPreview}
+                        controls
+                        className="h-28 w-full rounded-md border border-border bg-black object-cover"
+                      />
+                      <p className="truncate font-mono text-[11px] text-secondary">
+                        Video local guardado en el dispositivo
+                      </p>
+                    </div>
+                  )
                 )}
               </div>
             </div>
@@ -831,8 +978,14 @@ export const SightingModal: React.FC<SightingModalProps> = ({
             <Button tone="quiet" onClick={onClose}>
               Cancelar
             </Button>
-            <Button tone="primary" type="submit" disabled={!speciesId || !currentUser}>
-              Guardar avistamiento en bitácora
+            <Button
+              tone="primary"
+              type="submit"
+              disabled={!speciesId || !currentUser || (isEditing && !currentUser.isAdmin)}
+            >
+              {isEditing
+                ? 'Guardar cambios del avistamiento'
+                : 'Guardar avistamiento en bitácora'}
             </Button>
           </div>
         </form>

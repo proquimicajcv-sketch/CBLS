@@ -48,6 +48,8 @@ interface CatalogModuleProps {
   onSaveSpecies: (record: SpeciesRecord, overrideAdminCode?: string) => Promise<boolean> | void;
   onDeleteSpecies: (id: string, overrideAdminCode?: string) => Promise<void> | void;
   onQuickSighting: (speciesId: string) => void;
+  onEditSighting: (sighting: SightingEntry) => void;
+  onDeleteSighting: (sightingId: string) => Promise<boolean> | void;
 }
 
 const PHOTO_TAGS: PhotoTag[] = [
@@ -128,6 +130,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   onSaveSpecies,
   onDeleteSpecies,
   onQuickSighting,
+  onEditSighting,
+  onDeleteSighting,
 }) => {
   const activeSpecies =
     species.find((s) => s.id === selectedSpeciesId) ?? species[0] ?? null;
@@ -147,6 +151,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   const [pendingAdminAction, setPendingAdminAction] = useState<'save' | 'edit' | 'delete' | null>(null);
   const [verifiedAdminPin, setVerifiedAdminPin] = useState<string | null>(null);
   const [confirmAdminDelete, setConfirmAdminDelete] = useState(false);
+  const [confirmDeleteSightingId, setConfirmDeleteSightingId] = useState<string | null>(null);
 
   const [isPlayingCall, setIsPlayingCall] = useState<boolean>(false);
   const [stopAudio, setStopAudio] = useState<(() => void) | null>(null);
@@ -588,6 +593,119 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Sightings registered for this species (with Admin-only Edit/Delete) */}
+            {speciesSightings.length > 0 && (
+              <div className="divide-y divide-border border-t border-border">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Avistamientos registrados en campo ({speciesSightings.length})
+                    </h3>
+                    <p className="text-xs text-muted">
+                      Total contabilizado: {speciesTotalIndividuals} individuo(s)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="divide-y divide-border">
+                  {speciesSightings.map((si) => {
+                    const isConfirming = confirmDeleteSightingId === si.id;
+                    return (
+                      <div
+                        key={si.id}
+                        className="flex flex-col justify-between gap-3 px-5 py-3.5 sm:flex-row sm:items-start"
+                      >
+                        <div className="min-w-0 flex-1 space-y-1 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-primary">
+                              {si.observer}
+                            </span>
+                            <span className="rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary">
+                              {si.observationMethod || 'En persona'}
+                            </span>
+                            <span className="font-mono font-semibold text-foreground">
+                              {si.individualCount} ind.
+                            </span>
+                            <span className="font-mono text-muted">
+                              {si.observedDate} · {si.observedTime}
+                            </span>
+                          </div>
+                          <p className="text-foreground/90">
+                            <MapPin className="mr-1 inline h-3.5 w-3.5 text-secondary" />
+                            {si.locality} ·{' '}
+                            <span className="text-secondary">
+                              {getHoldridgeZoneInfo(si.holdridgeZone).shortName}
+                            </span>
+                          </p>
+                          <p className="font-mono text-[11px] text-muted">
+                            GPS: {si.latitude.toFixed(6)}° N, {si.longitude.toFixed(6)}° W · {si.elevationM} m s.n.m.
+                          </p>
+                          {si.sourceDetail && (
+                            <p className="text-muted">Fuente: {si.sourceDetail}</p>
+                          )}
+                          {si.notes && (
+                            <p className="text-foreground/85">Notas: {si.notes}</p>
+                          )}
+                          {si.id !== speciesSightings[0]?.id && (
+                            <LocalSightingMediaPreview sighting={si} />
+                          )}
+                        </div>
+
+                        {currentUser?.isAdmin && (
+                          <div className="flex shrink-0 flex-wrap items-center gap-2">
+                            {isConfirming ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteSightingId(null)}
+                                  className="rounded border border-border bg-input px-2.5 py-1 text-xs font-medium text-foreground hover:border-foreground/40"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setConfirmDeleteSightingId(null);
+                                    void onDeleteSighting(si.id);
+                                  }}
+                                  className="inline-flex items-center gap-1 rounded border border-coral bg-coral/20 px-2.5 py-1 text-xs font-semibold text-coral hover:bg-coral/30"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Confirmar
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setConfirmDeleteSightingId(null);
+                                    onEditSighting(si);
+                                  }}
+                                  className="inline-flex items-center gap-1 rounded border border-secondary/35 bg-secondary/10 px-2.5 py-1 text-xs font-medium text-secondary hover:bg-secondary/20"
+                                >
+                                  <Edit3 className="h-3.5 w-3.5" />
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteSightingId(si.id)}
+                                  className="inline-flex items-center gap-1 rounded border border-coral/35 bg-coral/10 px-2.5 py-1 text-xs font-medium text-coral hover:bg-coral/20"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Eliminar
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Media URLs Section (Photo, Video, Audio) */}
             <div className="p-5 border-t border-border space-y-3">

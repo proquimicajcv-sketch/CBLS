@@ -8,22 +8,71 @@ import type {
 
 export const ADMIN_PIN = '5531';
 
+export interface AssignedCodeProfile {
+  code: string;
+  assignedName: string;
+  isAdmin: boolean;
+}
+
+export const ASSIGNED_USER_CODES: Record<string, AssignedCodeProfile> = {
+  '5531': {
+    code: '5531',
+    assignedName: 'Jorge C',
+    isAdmin: true,
+  },
+  '1111': {
+    code: '1111',
+    assignedName: 'Brigadista 1',
+    isAdmin: false,
+  },
+  '2222': {
+    code: '2222',
+    assignedName: 'Brigadista 2',
+    isAdmin: false,
+  },
+  '3333': {
+    code: '3333',
+    assignedName: 'Brigadista 3',
+    isAdmin: false,
+  },
+  '4444': {
+    code: '4444',
+    assignedName: 'Brigadista 4',
+    isAdmin: false,
+  },
+  '5555': {
+    code: '5555',
+    assignedName: 'Brigadista 5',
+    isAdmin: false,
+  },
+};
+
 export const FIELD_ACCESS_CODES = [
-  '1420',
-  '2758',
-  '3914',
-  '6280',
-  '8463',
+  '1111',
+  '2222',
+  '3333',
+  '4444',
+  '5555',
 ] as const;
 
 export function validateAccessCode(rawCode: string): {
   valid: boolean;
   isAdmin: boolean;
   normalized: string;
+  assignedName?: string;
 } {
   const normalized = rawCode.trim().toUpperCase();
+  const assigned = ASSIGNED_USER_CODES[normalized];
+  if (assigned) {
+    return {
+      valid: true,
+      isAdmin: assigned.isAdmin,
+      normalized,
+      assignedName: assigned.assignedName,
+    };
+  }
   if (normalized === ADMIN_PIN) {
-    return { valid: true, isAdmin: true, normalized };
+    return { valid: true, isAdmin: true, normalized, assignedName: 'Jorge C' };
   }
   if ((FIELD_ACCESS_CODES as readonly string[]).includes(normalized)) {
     return { valid: true, isAdmin: false, normalized };

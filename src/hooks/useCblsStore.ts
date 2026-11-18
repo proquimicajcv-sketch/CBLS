@@ -34,6 +34,9 @@ import type {
 } from '../types/cbls';
 import { computeDatasetChecksum, validateAccessCode } from '../utils/ecology';
 import {
+  idbDeleteMediaBySighting,
+  idbDeleteMediaCapture,
+  idbDeleteSighting,
   idbDeleteSpecies,
   idbEnqueueOutboxItem,
   idbGetAllChangeLogs,
@@ -58,6 +61,8 @@ const CLOUD_MIGRATED_KEY = 'cbls_firestore_migrated_v1';
 export interface SightingMediaInput {
   photoFile?: File | null;
   videoFile?: File | null;
+  removeExistingPhoto?: boolean;
+  removeExistingVideo?: boolean;
 }
 
 function mergePendingSpecies(
@@ -93,16 +98,24 @@ function mergePendingSightings(
   const deletedSpeciesIds = new Set(
     outbox.filter((o) => o.kind === 'species_delete').map((o) => o.entityId),
   );
+  const deletedSightingIds = new Set(
+    outbox.filter((o) => o.kind === 'sighting_delete').map((o) => o.entityId),
+  );
   const byId = new Map<string, SightingEntry>();
   for (const si of cloudItems) {
-    if (!deletedSpeciesIds.has(si.speciesId)) {
+    if (!deletedSpeciesIds.has(si.speciesId) && !deletedSightingIds.has(si.id)) {
       byId.set(si.id, si);
     }
   }
   for (const item of outbox) {
-    if (item.kind === 'sighting_create') {
+    if (item.kind === 'sighting_create' || item.kind === 'sighting_update') {
       const si = item.payload as SightingEntry;
-      if (si && si.id && !deletedSpeciesIds.has(si.speciesId)) {
+      if (
+        si &&
+        si.id &&
+        !deletedSpeciesIds.has(si.speciesId) &&
+        !deletedSightingIds.has(si.id)
+      ) {
         byId.set(si.id, { ...si, synced: false });
       }
     }
@@ -171,7 +184,7 @@ export function useCblsStore() {
           const check = validateAccessCode(parsed.observerCode);
           if (check.valid) {
             return {
-              observerName: parsed.observerName.trim(),
+              observerName: check.assignedName || parsed.observerName.trim(),
               observerCode: check.normalized,
               isAdmin: check.isAdmin,
             };
@@ -296,12 +309,14 @@ export function useCblsStore() {
         try {
           await enableNetwork(db).catch(() => undefined);
 
-          // Respect dependency order: species upserts -> sightings -> deletes -> changelogs
+          // Respect dependency order: species upserts -> sightings -> updates -> deletes -> changelogs
           const orderWeight: Record<OfflineOutboxItem['kind'], number> = {
             species_upsert: 1,
             sighting_create: 2,
-            species_delete: 3,
-            changelog_create: 4,
+            sighting_update: 3,
+            sighting_delete: 4,
+            species_delete: 5,
+            changelog_create: 6,
           };
           const sorted = [...queue].sort(
             (a, b) =>
@@ -323,7 +338,7 @@ export function useCblsStore() {
                 await idbSaveSpecies({ ...cleanSp, synced: true });
                 await idbRemoveOutboxItem(item.id);
                 syncedCount += 1;
-              } else if (item.kind === 'sighting_create') {
+              } else if (item.kind === 'sighting_create' || item.kind === 'sighting_update') {
                 const rawSi = item.payload as SightingEntry;
                 let nextPhotoUrl = rawSi.photoUrl;
                 let nextVideoUrl = rawSi.videoUrl;
@@ -357,6 +372,11 @@ export function useCblsStore() {
                 });
                 await setDoc(doc(db, 'sightings', cleanSi.id), cleanSi);
                 await idbSaveSighting({ ...cleanSi, synced: true });
+                await idbRemoveOutboxItem(item.id);
+                syncedCount += 1;
+              } else if (item.kind === 'sighting_delete') {
+                const target = item.payload as { sightingId: string };
+                await deleteDoc(doc(db, 'sightings', target.sightingId));
                 await idbRemoveOutboxItem(item.id);
                 syncedCount += 1;
               } else if (item.kind === 'species_delete') {
@@ -737,22 +757,38 @@ export function useCblsStore() {
 
   const saveUserSession = useCallback(
     (name: string, code: string): { ok: boolean; error?: string; isAdmin?: boolean } => {
-      const cleanName = name.trim();
-      if (!cleanName) {
-        return { ok: false, error: 'Por favor indica tu nombre completo.' };
-      }
-
       const check = validateAccessCode(code);
       if (!check.valid) {
         return {
           ok: false,
           error:
-            'Código no autorizado. Ingresa uno de los 5 códigos fijos de campo o el código de administrador.',
+            'Código no autorizado. Ingresa tu código personal o uno de los códigos de campo asignados.',
         };
       }
 
+      const cleanName = name.trim();
+      let resolvedName = cleanName;
+
+      if (check.assignedName) {
+        const normInput = cleanName.toLowerCase().replace(/\./g, '');
+        const normAssigned = check.assignedName.toLowerCase().replace(/\./g, '');
+        if (
+          cleanName &&
+          normInput !== normAssigned &&
+          !normAssigned.startsWith(normInput)
+        ) {
+          return {
+            ok: false,
+            error: `Este código personal está asignado exclusivamente a ${check.assignedName}.`,
+          };
+        }
+        resolvedName = check.assignedName;
+      } else if (!cleanName) {
+        return { ok: false, error: 'Por favor indica tu nombre completo.' };
+      }
+
       const session: UserSession = {
-        observerName: cleanName,
+        observerName: resolvedName,
         observerCode: check.normalized,
         isAdmin: check.isAdmin,
       };
@@ -1172,6 +1208,321 @@ export function useCblsStore() {
     ],
   );
 
+  // Edit existing field sighting (strictly restricted to authorized personal admin code)
+  const updateSighting = useCallback(
+    async (
+      sightingId: string,
+      updates: Omit<SightingEntry, 'id' | 'occurrenceId' | 'synced' | 'createdAt'>,
+      mediaInput?: SightingMediaInput,
+      overrideAdminCode?: string,
+    ): Promise<boolean> => {
+      const authCode = overrideAdminCode || userSession?.observerCode || '';
+      const authCheck = validateAccessCode(authCode);
+      if (!authCheck.isAdmin) {
+        setStorageError(
+          'Solo el código personal de administrador autorizado puede editar avistamientos.',
+        );
+        return false;
+      }
+
+      const existing = sightings.find((s) => s.id === sightingId);
+      if (!existing) {
+        setStorageError('No se encontró el avistamiento seleccionado.');
+        return false;
+      }
+
+      const nowIso = new Date().toISOString();
+      const { observerCode: _omitObserverCode, ...cleanUpdates } = updates;
+      void _omitObserverCode;
+
+      let nextLocalPhotoId = mediaInput?.removeExistingPhoto
+        ? undefined
+        : existing.localPhotoId;
+      let nextLocalVideoId = mediaInput?.removeExistingVideo
+        ? undefined
+        : existing.localVideoId;
+
+      if (mediaInput?.removeExistingPhoto && existing.localPhotoId) {
+        await idbDeleteMediaCapture(existing.localPhotoId).catch(() => undefined);
+      }
+      if (mediaInput?.removeExistingVideo && existing.localVideoId) {
+        await idbDeleteMediaCapture(existing.localVideoId).catch(() => undefined);
+      }
+
+      if (mediaInput?.photoFile) {
+        if (existing.localPhotoId) {
+          await idbDeleteMediaCapture(existing.localPhotoId).catch(() => undefined);
+        }
+        nextLocalPhotoId = `img-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+        const photoCap: LocalMediaCapture = {
+          id: nextLocalPhotoId,
+          sightingId,
+          kind: 'photo',
+          fileName: mediaInput.photoFile.name || 'captura_campo.jpg',
+          mimeType: mediaInput.photoFile.type || 'image/jpeg',
+          sizeBytes: mediaInput.photoFile.size,
+          blob: mediaInput.photoFile,
+          createdAt: nowIso,
+        };
+        await idbSaveMediaCapture(photoCap);
+      }
+
+      if (mediaInput?.videoFile) {
+        if (existing.localVideoId) {
+          await idbDeleteMediaCapture(existing.localVideoId).catch(() => undefined);
+        }
+        nextLocalVideoId = `vid-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+        const videoCap: LocalMediaCapture = {
+          id: nextLocalVideoId,
+          sightingId,
+          kind: 'video',
+          fileName: mediaInput.videoFile.name || 'video_campo.mp4',
+          mimeType: mediaInput.videoFile.type || 'video/mp4',
+          sizeBytes: mediaInput.videoFile.size,
+          blob: mediaInput.videoFile,
+          createdAt: nowIso,
+        };
+        await idbSaveMediaCapture(videoCap);
+      }
+
+      const summaryParts: string[] = [];
+      if (nextLocalPhotoId) {
+        const cap = await idbGetMediaCapture(nextLocalPhotoId).catch(() => undefined);
+        summaryParts.push(cap ? `Foto (${formatMb(cap.sizeBytes)})` : 'Foto local');
+      }
+      if (nextLocalVideoId) {
+        const cap = await idbGetMediaCapture(nextLocalVideoId).catch(() => undefined);
+        summaryParts.push(cap ? `Video (${formatMb(cap.sizeBytes)})` : 'Video local');
+      }
+      void refreshMediaStats();
+
+      const basePayload = toFirestoreSightingPayload({
+        ...cleanUpdates,
+        id: existing.id,
+        occurrenceId: existing.occurrenceId,
+        createdAt: existing.createdAt,
+        localPhotoId: nextLocalPhotoId,
+        localVideoId: nextLocalVideoId,
+        localMediaSummary:
+          summaryParts.length > 0 ? summaryParts.join(' + ') : undefined,
+        synced: true,
+      });
+
+      const sp = species.find((s) => s.id === basePayload.speciesId);
+      const isOfflineNow = effectiveOffline || !navigator.onLine;
+      const localEntry: SightingEntry = {
+        ...basePayload,
+        synced: !isOfflineNow,
+      };
+
+      await idbSaveSighting(localEntry).catch(() => undefined);
+      setSightings((prev) =>
+        prev.map((s) => (s.id === localEntry.id ? localEntry : s)),
+      );
+      setLastSavedIso(nowIso);
+      setStorageError(null);
+
+      const logDetails = `${localEntry.individualCount} ind. · ${localEntry.observationMethod || 'En persona'} · ${localEntry.locality}`;
+
+      if (isOfflineNow) {
+        await enqueueOutbox({
+          id: `outbox-si-upd-${localEntry.id}`,
+          kind: 'sighting_update',
+          entityId: localEntry.id,
+          payload: localEntry,
+          createdAt: nowIso,
+          retries: 0,
+        });
+        await appendCloudChangeLog(
+          'Editó avistamiento',
+          sp ? `${sp.commonName} (${sp.catalogCode})` : existing.occurrenceId,
+          logDetails,
+          authCheck.assignedName || userSession?.observerName,
+        );
+        setStatusMessage(
+          `Avistamiento editado offline. Se sincronizará con Firebase al recuperar señal.`,
+        );
+        return true;
+      }
+
+      try {
+        let finalPhotoUrl = basePayload.photoUrl;
+        let finalVideoUrl = basePayload.videoUrl;
+
+        if (nextLocalPhotoId && !finalPhotoUrl) {
+          const cap = await idbGetMediaCapture(nextLocalPhotoId);
+          if (cap) {
+            const url = await uploadSightingMediaCapture(cap);
+            if (url) {
+              finalPhotoUrl = url;
+              await idbUpdateMediaUploadedUrl(cap.id, url);
+            }
+          }
+        }
+        if (nextLocalVideoId && !finalVideoUrl) {
+          const cap = await idbGetMediaCapture(nextLocalVideoId);
+          if (cap) {
+            const url = await uploadSightingMediaCapture(cap);
+            if (url) {
+              finalVideoUrl = url;
+              await idbUpdateMediaUploadedUrl(cap.id, url);
+            }
+          }
+        }
+
+        const cloudPayload = toFirestoreSightingPayload({
+          ...basePayload,
+          photoUrl: finalPhotoUrl,
+          videoUrl: finalVideoUrl,
+        });
+
+        await setDoc(doc(db, 'sightings', cloudPayload.id), cloudPayload);
+        await idbSaveSighting({ ...cloudPayload, synced: true }).catch(() => undefined);
+
+        await appendCloudChangeLog(
+          'Editó avistamiento',
+          sp ? `${sp.commonName} (${sp.catalogCode})` : existing.occurrenceId,
+          logDetails,
+          authCheck.assignedName || userSession?.observerName,
+        );
+
+        setStatusMessage(
+          `Avistamiento actualizado y sincronizado en tiempo real (${cloudPayload.individualCount} ind. · ${cloudPayload.locality}).`,
+        );
+        return true;
+      } catch (err) {
+        console.warn('Edición de avistamiento encolada offline tras fallo de red:', err);
+        await enqueueOutbox({
+          id: `outbox-si-upd-${localEntry.id}`,
+          kind: 'sighting_update',
+          entityId: localEntry.id,
+          payload: { ...localEntry, synced: false },
+          createdAt: nowIso,
+          retries: 0,
+        });
+        await appendCloudChangeLog(
+          'Editó avistamiento',
+          sp ? `${sp.commonName} (${sp.catalogCode})` : existing.occurrenceId,
+          logDetails,
+          authCheck.assignedName || userSession?.observerName,
+        );
+        setStatusMessage(
+          `Conexión inestable: cambios del avistamiento guardados localmente para sincronización automática.`,
+        );
+        return true;
+      }
+    },
+    [
+      sightings,
+      species,
+      userSession,
+      effectiveOffline,
+      enqueueOutbox,
+      appendCloudChangeLog,
+      refreshMediaStats,
+    ],
+  );
+
+  // Delete field sighting (strictly restricted to authorized personal admin code)
+  const deleteSighting = useCallback(
+    async (sightingId: string, overrideAdminCode?: string): Promise<boolean> => {
+      const authCode = overrideAdminCode || userSession?.observerCode || '';
+      const authCheck = validateAccessCode(authCode);
+      if (!authCheck.isAdmin) {
+        setStorageError(
+          'Solo el código personal de administrador autorizado puede eliminar avistamientos.',
+        );
+        return false;
+      }
+
+      const target = sightings.find((s) => s.id === sightingId);
+      const sp = target ? species.find((s) => s.id === target.speciesId) : undefined;
+      const targetLabel = sp
+        ? `${sp.commonName} (${sp.catalogCode})`
+        : target?.occurrenceId || sightingId;
+      const logDetails = target
+        ? `${target.individualCount} ind. · ${target.observedDate} · ${target.locality}`
+        : undefined;
+
+      await idbDeleteSighting(sightingId).catch(() => undefined);
+      await idbDeleteMediaBySighting(sightingId).catch(() => undefined);
+      await idbRemoveOutboxItem(`outbox-si-${sightingId}`).catch(() => undefined);
+      await idbRemoveOutboxItem(`outbox-si-upd-${sightingId}`).catch(() => undefined);
+
+      const remainingQueue = await idbGetAllOutboxItems().catch(() => outboxRef.current);
+      outboxRef.current = remainingQueue;
+      setOutboxItems(remainingQueue);
+
+      void refreshMediaStats();
+      setSightings((prev) => prev.filter((s) => s.id !== sightingId));
+      setLastSavedIso(new Date().toISOString());
+      setStorageError(null);
+
+      const isOfflineNow = effectiveOffline || !navigator.onLine;
+      if (isOfflineNow) {
+        await enqueueOutbox({
+          id: `outbox-si-del-${sightingId}`,
+          kind: 'sighting_delete',
+          entityId: sightingId,
+          payload: { sightingId },
+          createdAt: new Date().toISOString(),
+          retries: 0,
+        });
+        await appendCloudChangeLog(
+          'Eliminó avistamiento',
+          targetLabel,
+          logDetails,
+          authCheck.assignedName || userSession?.observerName,
+        );
+        setStatusMessage(
+          'Avistamiento eliminado localmente. Se actualizará en Firebase al reconectar.',
+        );
+        return true;
+      }
+
+      try {
+        await deleteDoc(doc(db, 'sightings', sightingId));
+        await appendCloudChangeLog(
+          'Eliminó avistamiento',
+          targetLabel,
+          logDetails,
+          authCheck.assignedName || userSession?.observerName,
+        );
+        setStatusMessage('Avistamiento eliminado en tiempo real en todos los dispositivos.');
+        return true;
+      } catch (err) {
+        console.warn('Eliminación de avistamiento encolada offline:', err);
+        await enqueueOutbox({
+          id: `outbox-si-del-${sightingId}`,
+          kind: 'sighting_delete',
+          entityId: sightingId,
+          payload: { sightingId },
+          createdAt: new Date().toISOString(),
+          retries: 0,
+        });
+        await appendCloudChangeLog(
+          'Eliminó avistamiento',
+          targetLabel,
+          logDetails,
+          authCheck.assignedName || userSession?.observerName,
+        );
+        setStatusMessage(
+          'Eliminado localmente; se sincronizará con Firebase al recuperar conexión estable.',
+        );
+        return true;
+      }
+    },
+    [
+      sightings,
+      species,
+      userSession,
+      effectiveOffline,
+      enqueueOutbox,
+      appendCloudChangeLog,
+      refreshMediaStats,
+    ],
+  );
+
   // Manual Sync trigger (runs outbox flush + audit sync batch log)
   const syncPendingRecords = useCallback(async () => {
     if (offlineAutonomousMode) {
@@ -1381,6 +1732,8 @@ export function useCblsStore() {
     toggleAutonomousMode,
     upsertSpecies,
     addSighting,
+    updateSighting,
+    deleteSighting,
     deleteSpecies,
     syncPendingRecords,
     syncOfflineOutboxToFirebase,

@@ -18,12 +18,14 @@ import {
   Check,
   Copy,
   Crosshair,
+  Edit3,
   Globe2,
   Map as MapIcon,
   MapPin,
   Mountain,
   Plus,
   Satellite,
+  Trash2,
   Video,
   Volume2,
 } from 'lucide-react';
@@ -32,6 +34,7 @@ import type {
   SightingEntry,
   SpeciesRecord,
   TaxonGroup,
+  UserSession,
 } from '../types/cbls';
 import {
   detectHoldridgeZoneByElevation,
@@ -45,6 +48,7 @@ import { Button, SpecimenImage, Surface } from './ui';
 interface GisMapModuleProps {
   species: SpeciesRecord[];
   sightings: SightingEntry[];
+  currentUser: UserSession | null;
   onOpenSpeciesDetail: (speciesId: string) => void;
   onRegisterAtPoint: (coords: {
     latitude: number;
@@ -53,6 +57,8 @@ interface GisMapModuleProps {
     holdridgeZone: HoldridgeZoneId;
     localityHint: string;
   }) => void;
+  onEditSighting: (sighting: SightingEntry) => void;
+  onDeleteSighting: (sightingId: string) => Promise<boolean> | void;
 }
 
 type GoogleMapTypeOption = 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
@@ -374,8 +380,11 @@ const InteractiveMapCanvas: React.FC<InteractiveMapCanvasProps> = ({
 export const GisMapModule: React.FC<GisMapModuleProps> = ({
   species,
   sightings,
+  currentUser,
   onOpenSpeciesDetail,
   onRegisterAtPoint,
+  onEditSighting,
+  onDeleteSighting,
 }) => {
   const [taxonFilter, setTaxonFilter] = useState<TaxonGroup | 'Todos'>('Todos');
   const [mapType, setMapType] = useState<GoogleMapTypeOption>('hybrid');
@@ -385,6 +394,9 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
   const [probePoint, setProbePoint] = useState<ProbePoint | null>(null);
   const [copiedCoords, setCopiedCoords] = useState<boolean>(false);
   const [gpsTriggerCount, setGpsTriggerCount] = useState<number>(0);
+  const [confirmDeleteSightingId, setConfirmDeleteSightingId] = useState<
+    string | null
+  >(null);
   const [pendingFocusSector, setPendingFocusSector] = useState<{
     lat: number;
     lng: number;
@@ -847,6 +859,59 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
                     Nuevo en sitio
                   </Button>
                 </div>
+
+                {currentUser?.isAdmin && (
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
+                    {confirmDeleteSightingId === activeSighting.id ? (
+                      <>
+                        <span className="mr-auto text-xs font-medium text-coral">
+                          ¿Eliminar este avistamiento?
+                        </span>
+                        <Button
+                          tone="quiet"
+                          onClick={() => setConfirmDeleteSightingId(null)}
+                          className="min-h-9 text-xs"
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          tone="coral"
+                          onClick={() => {
+                            const idToDel = activeSighting.id;
+                            setConfirmDeleteSightingId(null);
+                            void onDeleteSighting(idToDel);
+                          }}
+                          className="min-h-9 text-xs"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Confirmar
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          tone="secondary"
+                          onClick={() => {
+                            setConfirmDeleteSightingId(null);
+                            onEditSighting(activeSighting);
+                          }}
+                          className="min-h-9 flex-1 text-xs"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                          Editar avistamiento
+                        </Button>
+                        <Button
+                          tone="coral"
+                          onClick={() => setConfirmDeleteSightingId(activeSighting.id)}
+                          className="min-h-9 flex-1 text-xs"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Eliminar avistamiento
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </Surface>
           ) : (

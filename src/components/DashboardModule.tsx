@@ -4,11 +4,13 @@ import {
   BarChart3,
   Camera,
   Compass,
+  Edit3,
   FilePlus2,
   History,
   LayoutGrid,
   Plus,
   Square,
+  Trash2,
   UserCheck,
   Video,
   Volume2,
@@ -46,6 +48,8 @@ interface DashboardModuleProps {
   onOpenSpeciesDetail: (speciesId: string) => void;
   onOpenNewSpecies: () => void;
   onQuickSighting: (speciesId?: string) => void;
+  onEditSighting: (sighting: SightingEntry) => void;
+  onDeleteSighting: (sightingId: string) => Promise<boolean> | void;
 }
 
 export const DashboardModule: React.FC<DashboardModuleProps> = ({
@@ -64,6 +68,8 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   onOpenSpeciesDetail,
   onOpenNewSpecies,
   onQuickSighting,
+  onEditSighting,
+  onDeleteSighting,
 }) => {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [stopAudioFn, setStopAudioFn] = useState<(() => void) | null>(null);
@@ -72,6 +78,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   );
   const [selectedBrigadista, setSelectedBrigadista] = useState<string>('Todos');
   const [showAllSightings, setShowAllSightings] = useState<boolean>(false);
+  const [confirmDeleteSightingId, setConfirmDeleteSightingId] = useState<
+    string | null
+  >(null);
 
   const featuredSpecies = species[0] ?? null;
 
@@ -612,14 +621,17 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                 <>
                   {visibleTeamSightings.map((obs) => {
                     const sp = speciesMap.get(obs.speciesId);
+                    const isConfirmingDelete = confirmDeleteSightingId === obs.id;
                     return (
-                      <button
+                      <div
                         key={obs.id}
-                        type="button"
-                        onClick={() => sp && onOpenSpeciesDetail(sp.id)}
-                        className="flex w-full items-start justify-between gap-3 px-5 py-3.5 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-primary"
+                        className="flex w-full items-start justify-between gap-3 px-5 py-3.5 transition-colors hover:bg-foreground/5"
                       >
-                        <div className="min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => sp && onOpenSpeciesDetail(sp.id)}
+                          className="min-w-0 flex-1 text-left focus-visible:outline-2 focus-visible:outline-primary"
+                        >
                           <div className="flex flex-wrap items-center gap-1.5 text-xs">
                             <span className="max-w-[210px] truncate font-semibold text-primary">
                               Brigadista: {obs.observer}
@@ -675,18 +687,71 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                               Notas: {obs.notes}
                             </p>
                           )}
-                        </div>
+                        </button>
 
-                        <div className="shrink-0 text-right font-mono text-xs">
-                          <span className="font-semibold text-primary">
-                            {obs.individualCount} ind.
-                          </span>
-                          <p className="mt-0.5 text-muted">{obs.elevationM} m</p>
-                          <p className="text-muted/80">
-                            {obs.observedDate} · {obs.observedTime}
-                          </p>
+                        <div className="flex shrink-0 flex-col items-end gap-2 text-right font-mono text-xs">
+                          <div>
+                            <span className="font-semibold text-primary">
+                              {obs.individualCount} ind.
+                            </span>
+                            <p className="mt-0.5 text-muted">{obs.elevationM} m</p>
+                            <p className="text-muted/80">
+                              {obs.observedDate} · {obs.observedTime}
+                            </p>
+                          </div>
+
+                          {currentUser?.isAdmin && (
+                            <div className="flex flex-wrap items-center justify-end gap-1.5 font-sans">
+                              {isConfirmingDelete ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteSightingId(null)}
+                                    className="rounded border border-border bg-input px-2 py-1 text-[11px] font-medium text-foreground hover:border-foreground/40"
+                                  >
+                                    Cancelar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirmDeleteSightingId(null);
+                                      void onDeleteSighting(obs.id);
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded border border-coral bg-coral/20 px-2 py-1 text-[11px] font-semibold text-coral hover:bg-coral/30"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    Confirmar
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirmDeleteSightingId(null);
+                                      onEditSighting(obs);
+                                    }}
+                                    title="Editar avistamiento"
+                                    className="inline-flex items-center gap-1 rounded border border-secondary/35 bg-secondary/10 px-2 py-1 text-[11px] font-medium text-secondary hover:bg-secondary/20"
+                                  >
+                                    <Edit3 className="h-3 w-3" />
+                                    Editar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteSightingId(obs.id)}
+                                    title="Eliminar avistamiento"
+                                    className="inline-flex items-center gap-1 rounded border border-coral/35 bg-coral/10 px-2 py-1 text-[11px] font-medium text-coral hover:bg-coral/20"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    Eliminar
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                   {filteredTeamSightings.length > 8 && (

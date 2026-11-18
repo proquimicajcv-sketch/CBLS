@@ -281,6 +281,30 @@ export async function idbUpdateMediaUploadedUrl(
   await idbSaveMediaCapture({ ...existing, uploadedUrl });
 }
 
+export async function idbDeleteMediaCapture(captureId: string): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIA_CAPTURES, 'readwrite');
+    const store = tx.objectStore(STORE_MEDIA_CAPTURES);
+    const req = store.delete(captureId);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function idbDeleteMediaBySighting(sightingId: string): Promise<void> {
+  const captures = await idbGetMediaBySighting(sightingId);
+  if (captures.length === 0) return;
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIA_CAPTURES, 'readwrite');
+    const store = tx.objectStore(STORE_MEDIA_CAPTURES);
+    captures.forEach((cap) => store.delete(cap.id));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // Offline Sync Outbox Queue (Auto-flushes to Firebase on reconnection)
 export async function idbEnqueueOutboxItem(
   item: OfflineOutboxItem,

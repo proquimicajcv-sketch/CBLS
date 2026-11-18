@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Eye, EyeOff, ShieldCheck, UserCheck } from 'lucide-react';
 import type { UserSession } from '../types/cbls';
+import { validateAccessCode } from '../utils/ecology';
 import { Button, Field, inputClassName, Surface } from './ui';
 
 interface UserSessionModalProps {
@@ -23,6 +24,8 @@ export const UserSessionModal: React.FC<UserSessionModalProps> = ({
   const [showCode, setShowCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const codeCheck = validateAccessCode(code);
+
   useEffect(() => {
     if (open) {
       setName(currentSession?.observerName || '');
@@ -36,7 +39,8 @@ export const UserSessionModal: React.FC<UserSessionModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
+    const resolvedInputName = name.trim() || codeCheck.assignedName || '';
+    if (!resolvedInputName) {
       setError('Por favor indica tu nombre completo.');
       return;
     }
@@ -45,7 +49,7 @@ export const UserSessionModal: React.FC<UserSessionModalProps> = ({
       return;
     }
 
-    const res = onSave(name.trim(), code.trim().toUpperCase());
+    const res = onSave(resolvedInputName, code.trim().toUpperCase());
     if (!res.ok) {
       setError(res.error || 'Código de acceso no autorizado.');
       return;
@@ -72,7 +76,7 @@ export const UserSessionModal: React.FC<UserSessionModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <p className="text-xs text-foreground/85 leading-relaxed">
-            Ingresa tu nombre o identificador de brigadista y uno de los códigos de acceso asignados para el Corredor Biológico Los Santos.{' '}
+            Ingresa tu nombre o identificador de brigadista y tu código de acceso asignado para el Corredor Biológico Los Santos.{' '}
             <span className="text-secondary font-medium">
               Tu nombre quedará vinculado a cada avistamiento y cambio para la vista consolidada del equipo.
             </span>
@@ -82,10 +86,10 @@ export const UserSessionModal: React.FC<UserSessionModalProps> = ({
             <input
               id="observer-name-input"
               type="text"
-              required
+              required={!codeCheck.assignedName}
               autoFocus
-              placeholder="Ej. Valeria Mora / Brigadista 03"
-              value={name}
+              placeholder="Ej. Jorge C / Brigadista 1"
+              value={codeCheck.assignedName && !name.trim() ? codeCheck.assignedName : name}
               onChange={(e) => {
                 setName(e.target.value);
                 setError(null);
@@ -109,7 +113,12 @@ export const UserSessionModal: React.FC<UserSessionModalProps> = ({
                 placeholder="Ingresa tu código asignado"
                 value={code}
                 onChange={(e) => {
-                  setCode(e.target.value.toUpperCase());
+                  const nextCode = e.target.value.toUpperCase();
+                  setCode(nextCode);
+                  const matched = validateAccessCode(nextCode);
+                  if (matched.assignedName) {
+                    setName(matched.assignedName);
+                  }
                   setError(null);
                 }}
                 className={`${inputClassName} font-mono tracking-widest pr-20`}
@@ -125,6 +134,13 @@ export const UserSessionModal: React.FC<UserSessionModalProps> = ({
               <ShieldCheck className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary" />
             </div>
           </Field>
+
+          {codeCheck.valid && codeCheck.assignedName && (
+            <p className="text-xs font-medium text-secondary">
+              Perfil asignado reconocido: {codeCheck.assignedName}
+              {codeCheck.isAdmin ? ' · Administrador autorizado' : ''}
+            </p>
+          )}
 
           {error && (
             <p role="alert" className="text-xs text-coral font-medium">

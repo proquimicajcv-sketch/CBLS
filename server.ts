@@ -26,7 +26,7 @@ const DATA_DIR = path.join(process.cwd(), '.data');
 const DB_FILE = path.join(DATA_DIR, 'cbls-db.json');
 
 const ADMIN_PIN = '5531';
-const FIELD_ACCESS_CODES = ['1420', '2758', '3914', '6280', '8463'];
+const FIELD_ACCESS_CODES = ['1111', '2222', '3333', '4444', '5555'];
 
 function checkAccessCode(raw: unknown): {
   valid: boolean;

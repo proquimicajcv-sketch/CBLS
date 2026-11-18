@@ -132,6 +132,8 @@ export type OfflineOutboxKind =
   | 'species_upsert'
   | 'species_delete'
   | 'sighting_create'
+  | 'sighting_update'
+  | 'sighting_delete'
   | 'changelog_create';
 
 export interface OfflineOutboxItem {
@@ -155,6 +157,8 @@ export type ChangeLogAction =
   | 'Editó especie'
   | 'Eliminó especie'
   | 'Registró avistamiento'
+  | 'Editó avistamiento'
+  | 'Eliminó avistamiento'
   | 'Sincronizó lote'
   | 'Importó respaldo'
   | 'Reinició base';

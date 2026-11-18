@@ -23,7 +23,7 @@ import { StatsModule } from './components/StatsModule';
 import { Button } from './components/ui';
 import { UserSessionModal } from './components/UserSessionModal';
 import { useCblsStore } from './hooks/useCblsStore';
-import type { AppModuleId, HoldridgeZoneId } from './types/cbls';
+import type { AppModuleId, HoldridgeZoneId, SightingEntry } from './types/cbls';
 
 const LEFT_NAV_ITEMS: Array<{
   id: AppModuleId;
@@ -66,6 +66,9 @@ export default function App() {
   const [sightingModalSpeciesId, setSightingModalSpeciesId] = useState<
     string | undefined
   >(undefined);
+  const [editingSighting, setEditingSighting] = useState<SightingEntry | null>(
+    null,
+  );
   const [sightingPresetCoords, setSightingPresetCoords] = useState<{
     latitude: number;
     longitude: number;
@@ -109,7 +112,22 @@ export default function App() {
         setUserSessionModalOpen(true);
         return;
       }
+      setEditingSighting(null);
       setSightingModalSpeciesId(speciesId);
+      setSightingPresetCoords(null);
+      setSightingModalOpen(true);
+    },
+    [store.userSession],
+  );
+
+  const handleEditSighting = useCallback(
+    (sighting: SightingEntry) => {
+      if (!store.userSession?.isAdmin) {
+        setUserSessionModalOpen(true);
+        return;
+      }
+      setEditingSighting(sighting);
+      setSightingModalSpeciesId(sighting.speciesId);
       setSightingPresetCoords(null);
       setSightingModalOpen(true);
     },
@@ -128,6 +146,7 @@ export default function App() {
         setUserSessionModalOpen(true);
         return;
       }
+      setEditingSighting(null);
       setSightingModalSpeciesId(selectedSpeciesId ?? store.species[0]?.id);
       setSightingPresetCoords(coords);
       setSightingModalOpen(true);
@@ -396,6 +415,8 @@ export default function App() {
               onOpenSpeciesDetail={handleOpenSpeciesDetail}
               onOpenNewSpecies={handleOpenNewSpecies}
               onQuickSighting={handleQuickSighting}
+              onEditSighting={handleEditSighting}
+              onDeleteSighting={store.deleteSighting}
             />
           )}
 
@@ -412,6 +433,8 @@ export default function App() {
               onSaveSpecies={store.upsertSpecies}
               onDeleteSpecies={store.deleteSpecies}
               onQuickSighting={handleQuickSighting}
+              onEditSighting={handleEditSighting}
+              onDeleteSighting={store.deleteSighting}
             />
           )}
 
@@ -419,8 +442,11 @@ export default function App() {
             <GisMapModule
               species={store.species}
               sightings={store.sightings}
+              currentUser={store.userSession}
               onOpenSpeciesDetail={handleOpenSpeciesDetail}
               onRegisterAtPoint={handleRegisterAtMapPoint}
+              onEditSighting={handleEditSighting}
+              onDeleteSighting={store.deleteSighting}
             />
           )}
 
@@ -494,16 +520,26 @@ export default function App() {
           </ul>
         </nav>
 
-        {/* Modal for Georeferenced Sighting Registration */}
+        {/* Modal for Georeferenced Sighting Registration & Admin Editing */}
         <SightingModal
           open={sightingModalOpen}
           speciesList={store.species}
           initialSpeciesId={sightingModalSpeciesId}
+          editingSighting={editingSighting}
           presetCoords={sightingPresetCoords}
           currentUser={store.userSession}
           onRequestUserSession={() => setUserSessionModalOpen(true)}
-          onClose={() => setSightingModalOpen(false)}
-          onSave={store.addSighting}
+          onClose={() => {
+            setSightingModalOpen(false);
+            setEditingSighting(null);
+          }}
+          onSave={async (entry, mediaInput) => {
+            if (editingSighting) {
+              await store.updateSighting(editingSighting.id, entry, mediaInput);
+            } else {
+              await store.addSighting(entry, mediaInput);
+            }
+          }}
         />
       </div>
     </MotionConfig>
