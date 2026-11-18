@@ -1,17 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  APIProvider,
-  APILoadingStatus,
-  AdvancedMarker,
-  InfoWindow,
-  Map as GoogleMap,
-  Pin,
-  useAdvancedMarkerRef,
-  useApiLoadingStatus,
-  useMap,
-  useMapsLibrary,
-  type MapMouseEvent,
-} from '@vis.gl/react-google-maps';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   ArrowUpRight,
   Camera,
@@ -61,10 +50,10 @@ interface GisMapModuleProps {
   onDeleteSighting: (sightingId: string) => Promise<boolean> | void;
 }
 
-type GoogleMapTypeOption = 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
+type GisLayerOption = 'hybrid' | 'satellite' | 'roadmap' | 'terrain';
 
 const MAP_TYPES: Array<{
-  id: GoogleMapTypeOption;
+  id: GisLayerOption;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
@@ -74,352 +63,132 @@ const MAP_TYPES: Array<{
   { id: 'terrain', label: 'Terreno', icon: Mountain },
 ];
 
+// Coordenadas verificadas del Parque Central de San Marcos de Tarrazú (OpenStreetMap)
+const PARQUE_CENTRAL_SAN_MARCOS = {
+  lat: 9.659503,
+  lng: -84.022267,
+  zoom: 16,
+};
+
 const CBLS_SECTORS = [
-  { name: 'San Marcos (Parque Central)', lat: 9.6602, lng: -84.0209, zoom: 16 },
+  {
+    name: 'San Marcos (Parque Central)',
+    lat: PARQUE_CENTRAL_SAN_MARCOS.lat,
+    lng: PARQUE_CENTRAL_SAN_MARCOS.lng,
+    zoom: PARQUE_CENTRAL_SAN_MARCOS.zoom,
+  },
   { name: 'San Gerardo de Dota', lat: 9.5525, lng: -83.8065, zoom: 14 },
   { name: 'Santa María de Dota', lat: 9.6531, lng: -83.9708, zoom: 14 },
   { name: 'San Pablo de León Cortés', lat: 9.6855, lng: -84.0419, zoom: 14 },
   { name: 'Cerro Buenavista', lat: 9.5562, lng: -83.7536, zoom: 14 },
 ];
 
-const CBLS_DEFAULT_CENTER = { lat: 9.6602, lng: -84.0209 };
-
-const BUILD_MAPS_API_KEY =
-  (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ||
-  (typeof __GOOGLE_MAPS_API_KEY__ !== 'undefined'
-    ? __GOOGLE_MAPS_API_KEY__
-    : '');
-
 interface ProbePoint {
   lat: number;
   lng: number;
   elevationM: number;
   holdridgeZone: HoldridgeZoneId;
-  elevationSource: 'google' | 'modelo';
+  elevationSource: 'dem' | 'modelo';
   originLabel: string;
 }
 
-interface SightingMarkerProps {
-  sighting: SightingEntry;
-  species?: SpeciesRecord;
-  isSelected: boolean;
-  onSelect: (sightingId: string) => void;
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-const SightingAdvancedMarker: React.FC<SightingMarkerProps> = ({
-  sighting,
-  species,
-  isSelected,
-  onSelect,
-}) => {
-  const [markerRef, marker] = useAdvancedMarkerRef();
-  const color = species ? TAXON_COLOR_MAP[species.taxon] : '#86E5B0';
+function createPinIcon(fill: string, isSelected: boolean, isProbe = false): L.DivIcon {
+  const size = isSelected || isProbe ? 34 : 28;
+  const ring = isSelected ? '#FFFFFF' : '#030F0A';
+  const strokeWidth = isSelected ? 2.6 : 2;
+  const centerDot = isProbe ? '#030F0A' : '#030F0A';
 
-  return (
-    <>
-      <AdvancedMarker
-        ref={markerRef}
-        position={{ lat: sighting.latitude, lng: sighting.longitude }}
-        title={`${species?.commonName || 'Avistamiento'} · ${sighting.locality}`}
-        onClick={() => onSelect(sighting.id)}
-      >
-        <Pin
-          background={color}
-          borderColor={isSelected ? '#FFFFFF' : '#030F0A'}
-          glyphColor="#030F0A"
-          scale={isSelected ? 1.25 : 1}
-        />
-      </AdvancedMarker>
-
-      {isSelected && marker && (
-        <InfoWindow
-          anchor={marker}
-          maxWidth={250}
-          onCloseClick={() => onSelect('')}
-        >
-          <div className="space-y-1 p-1 text-slate-900">
-            <p className="text-xs font-bold">
-              {species?.commonName || 'Especie registrada'}
-            </p>
-            <p className="text-[11px] italic text-slate-600">
-              {species?.scientificName || 'Indeterminado'}
-            </p>
-            <p className="font-mono text-[11px] text-slate-800">
-              {sighting.latitude.toFixed(6)}, {sighting.longitude.toFixed(6)}
-            </p>
-            <p className="text-[11px] text-slate-700">
-              {sighting.elevationM} m s.n.m. · {sighting.individualCount} ind.
-            </p>
-            <p className="text-[11px] font-semibold text-slate-800">
-              Método: {sighting.observationMethod || 'En persona'}
-            </p>
-            <p className="text-[11px] font-medium text-emerald-800">
-              Registró: {sighting.observer}
-            </p>
-          </div>
-        </InfoWindow>
-      )}
-    </>
-  );
-};
-
-interface InteractiveMapCanvasProps {
-  mapType: GoogleMapTypeOption;
-  filteredSightings: SightingEntry[];
-  speciesLookup: Record<string, SpeciesRecord>;
-  selectedSightingId: string | null;
-  onSelectSighting: (id: string) => void;
-  probePoint: ProbePoint | null;
-  onSetProbePoint: (pt: ProbePoint | null) => void;
-  pendingFocusSector: { lat: number; lng: number; zoom: number } | null;
-  onConsumedFocus: () => void;
-  onParqueCentralResolved: (coords: { lat: number; lng: number }, label: string) => void;
-  onGpsLocated: (lat: number, lng: number, altMeters?: number | null) => void;
-  gpsTriggerCount: number;
+  return L.divIcon({
+    className: 'cbls-leaflet-pin',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size - 2],
+    popupAnchor: [0, -(size - 6)],
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.65)); display:block;">
+      <path d="M14 2C8.9 2 4.8 6.1 4.8 11.2c0 6.8 9.2 14.8 9.2 14.8s9.2-8 9.2-14.8C23.2 6.1 19.1 2 14 2z" fill="${escapeHtml(fill)}" stroke="${ring}" stroke-width="${strokeWidth}"/>
+      <circle cx="14" cy="11" r="3.4" fill="${centerDot}" />
+    </svg>`,
+  });
 }
 
-const InteractiveMapCanvas: React.FC<InteractiveMapCanvasProps> = ({
-  mapType,
-  filteredSightings,
-  speciesLookup,
-  selectedSightingId,
-  onSelectSighting,
-  probePoint,
-  onSetProbePoint,
-  pendingFocusSector,
-  onConsumedFocus,
-  onParqueCentralResolved,
-  onGpsLocated,
-  gpsTriggerCount,
-}) => {
-  const map = useMap();
-  const elevationLib = useMapsLibrary('elevation');
-  const placesLib = useMapsLibrary('places');
-  const loadingStatus = useApiLoadingStatus();
-  const hasCenteredParqueRef = useRef<boolean>(false);
+function createLandmarkIcon(): L.DivIcon {
+  return L.divIcon({
+    className: 'cbls-leaflet-landmark',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -10],
+    html: `<div style="width:22px;height:22px;border-radius:9999px;background:#071912;border:2px solid #86E5B0;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.6);">
+      <div style="width:7px;height:7px;border-radius:9999px;background:#86E5B0;"></div>
+    </div>`,
+  });
+}
 
-  const resolveElevationAndSetProbe = useCallback(
-    async (
-      rawLat: number,
-      rawLng: number,
-      originLabel: string,
-      gpsAltitude?: number | null,
-    ) => {
-      const lat = Number(rawLat.toFixed(6));
-      const lng = Number(rawLng.toFixed(6));
-      const fallbackElev =
-        typeof gpsAltitude === 'number' && Number.isFinite(gpsAltitude)
-          ? Math.round(gpsAltitude)
-          : estimateCblsElevationFromCoords(lat, lng);
-
-      // Immediate feedback with fallback/GPS altitude
-      onSetProbePoint({
-        lat,
-        lng,
-        elevationM: fallbackElev,
-        holdridgeZone: detectHoldridgeZoneByElevation(fallbackElev),
-        elevationSource: 'modelo',
-        originLabel,
-      });
-
-      // Refine with Google Maps Elevation Service when available
-      if (elevationLib && navigator.onLine) {
-        try {
-          const elevator = new elevationLib.ElevationService();
-          const res = await elevator.getElevationForLocations({
-            locations: [{ lat, lng }],
-          });
-          const elevMeters = res.results?.[0]?.elevation;
-          if (typeof elevMeters === 'number' && Number.isFinite(elevMeters)) {
-            const rounded = Math.max(0, Math.round(elevMeters));
-            onSetProbePoint({
-              lat,
-              lng,
-              elevationM: rounded,
-              holdridgeZone: detectHoldridgeZoneByElevation(rounded),
-              elevationSource: 'google',
-              originLabel,
-            });
-          }
-        } catch {
-          // Keep fallback elevation gracefully
-        }
-      }
-    },
-    [elevationLib, onSetProbePoint],
-  );
-
-  // Always start centered on Parque Central, San Marcos de Tarrazú via Places API (New)
-  useEffect(() => {
-    if (!map || !placesLib || hasCenteredParqueRef.current) return;
-    hasCenteredParqueRef.current = true;
-
-    let cancelled = false;
-    const centerOnParqueCentral = async () => {
-      try {
-        const { places } = await placesLib.Place.searchByText({
-          textQuery: 'Parque Central, San Marcos de Tarrazú, San José, Costa Rica',
-          fields: ['displayName', 'location'],
-          maxResultCount: 1,
-          language: 'es',
-          region: 'cr',
-        });
-        if (cancelled) return;
-        const target = places?.[0];
-        if (target?.location) {
-          const coords = {
-            lat: target.location.lat(),
-            lng: target.location.lng(),
-          };
-          map.setCenter(coords);
-          map.setZoom(16);
-          onParqueCentralResolved(
-            coords,
-            target.displayName || 'Parque Central, San Marcos de Tarrazú',
-          );
-        }
-      } catch {
-        // Keep San Marcos de Tarrazú default viewport gracefully
-      }
-    };
-
-    void centerOnParqueCentral();
-    return () => {
-      cancelled = true;
-    };
-  }, [map, placesLib, onParqueCentralResolved]);
-
-  // Focus camera when a sector chip is clicked
-  useEffect(() => {
-    if (!map || !pendingFocusSector) return;
-    map.panTo({ lat: pendingFocusSector.lat, lng: pendingFocusSector.lng });
-    map.setZoom(pendingFocusSector.zoom);
-    onConsumedFocus();
-  }, [map, pendingFocusSector, onConsumedFocus]);
-
-  // Trigger GPS location + pan when requested by parent toolbar
-  useEffect(() => {
-    if (gpsTriggerCount === 0) return;
-    if (!('geolocation' in navigator)) {
-      const lat = 9.5525;
-      const lng = -83.8065;
-      if (map) {
-        map.panTo({ lat, lng });
-        map.setZoom(15);
-      }
-      resolveElevationAndSetProbe(lat, lng, 'Referencia Estación San Gerardo');
-      onGpsLocated(lat, lng, 2240);
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = Number(pos.coords.latitude.toFixed(6));
-        const lng = Number(pos.coords.longitude.toFixed(6));
-        if (map) {
-          map.panTo({ lat, lng });
-          map.setZoom(16);
-        }
-        resolveElevationAndSetProbe(
-          lat,
-          lng,
-          'GPS satelital del dispositivo',
-          pos.coords.altitude,
-        );
-        onGpsLocated(lat, lng, pos.coords.altitude);
-      },
-      () => {
-        const lat = 9.5525;
-        const lng = -83.8065;
-        if (map) {
-          map.panTo({ lat, lng });
-          map.setZoom(15);
-        }
-        resolveElevationAndSetProbe(
-          lat,
-          lng,
-          'Referencia CBLS (sin permiso GPS)',
-          2240,
-        );
-        onGpsLocated(lat, lng, 2240);
-      },
-      { enableHighAccuracy: true, timeout: 6000 },
-    );
-  }, [gpsTriggerCount, map, onGpsLocated, resolveElevationAndSetProbe]);
-
-  const handleMapClick = useCallback(
-    (ev: MapMouseEvent) => {
-      const latLng = ev.detail.latLng;
-      if (!latLng) return;
-      resolveElevationAndSetProbe(
-        latLng.lat,
-        latLng.lng,
-        'Punto marcado en el mapa',
-      );
-    },
-    [resolveElevationAndSetProbe],
-  );
-
-  if (
-    loadingStatus === APILoadingStatus.FAILED ||
-    loadingStatus === APILoadingStatus.AUTH_FAILURE
-  ) {
-    return (
-      <div className="flex h-[480px] flex-col items-center justify-center gap-3 rounded-control border border-coral/35 bg-[#05140D] p-6 text-center">
-        <MapPin className="h-8 w-8 text-coral" />
-        <h3 className="text-base font-semibold text-foreground">
-          No se pudo inicializar Google Maps en este momento
-        </h3>
-        <p className="max-w-md text-xs text-muted">
-          Verifica tu conexión a internet o el estado de tu clave de Google Maps
-          Platform. Los avistamientos almacenados en IndexedDB permanecen intactos.
-        </p>
-      </div>
-    );
+function buildLayerGroup(layerType: GisLayerOption): L.LayerGroup {
+  if (layerType === 'satellite') {
+    return L.layerGroup([
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        {
+          attribution: 'Imágenes © Esri, Maxar, Earthstar Geographics',
+          maxZoom: 19,
+        },
+      ),
+    ]);
   }
 
-  return (
-    <div className="relative h-[460px] w-full overflow-hidden rounded-control border border-primary/20 bg-[#05140D] sm:h-[540px]">
-      <GoogleMap
-        mapId="DEMO_MAP_ID"
-        internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-        defaultCenter={CBLS_DEFAULT_CENTER}
-        defaultZoom={16}
-        mapTypeId={mapType}
-        gestureHandling="greedy"
-        streetViewControl={true}
-        fullscreenControl={true}
-        mapTypeControl={false}
-        onClick={handleMapClick}
-        style={{ width: '100%', height: '100%' }}
-      >
-        {filteredSightings.map((obs) => (
-          <SightingAdvancedMarker
-            key={obs.id}
-            sighting={obs}
-            species={speciesLookup[obs.speciesId]}
-            isSelected={selectedSightingId === obs.id}
-            onSelect={(id) => onSelectSighting(id)}
-          />
-        ))}
+  if (layerType === 'roadmap') {
+    return L.layerGroup([
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19,
+      }),
+    ]);
+  }
 
-        {probePoint && (
-          <AdvancedMarker
-            position={{ lat: probePoint.lat, lng: probePoint.lng }}
-            title={`Punto seleccionado: ${probePoint.lat.toFixed(6)}, ${probePoint.lng.toFixed(6)}`}
-          >
-            <Pin
-              background="#86E5B0"
-              borderColor="#030F0A"
-              glyphColor="#030F0A"
-              scale={1.2}
-            />
-          </AdvancedMarker>
-        )}
-      </GoogleMap>
-    </div>
-  );
-};
+  if (layerType === 'terrain') {
+    return L.layerGroup([
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+        {
+          attribution: 'Topografía © Esri, USGS, OpenStreetMap',
+          maxZoom: 19,
+        },
+      ),
+    ]);
+  }
+
+  // Híbrido: satélite Esri + calles/límites/lugares de referencia
+  return L.layerGroup([
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: 'Satélite © Esri · Referencia © Esri / OSM',
+        maxZoom: 19,
+      },
+    ),
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 19,
+        opacity: 0.85,
+      },
+    ),
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 19,
+      },
+    ),
+  ]);
+}
 
 export const GisMapModule: React.FC<GisMapModuleProps> = ({
   species,
@@ -431,53 +200,21 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
   onDeleteSighting,
 }) => {
   const [taxonFilter, setTaxonFilter] = useState<TaxonGroup | 'Todos'>('Todos');
-  const [mapType, setMapType] = useState<GoogleMapTypeOption>('hybrid');
+  const [mapType, setMapType] = useState<GisLayerOption>('hybrid');
   const [selectedSightingId, setSelectedSightingId] = useState<string | null>(
     null,
   );
-  const [mapsApiKey, setMapsApiKey] = useState<string>(BUILD_MAPS_API_KEY);
-  const [checkingRuntimeKey, setCheckingRuntimeKey] = useState<boolean>(
-    !BUILD_MAPS_API_KEY,
-  );
-  const [parqueCentralCoords, setParqueCentralCoords] = useState<{
-    lat: number;
-    lng: number;
-  } | null>(null);
-  const [parqueCentralLabel, setParqueCentralLabel] = useState<string>(
-    'Parque Central, San Marcos de Tarrazú',
-  );
   const [probePoint, setProbePoint] = useState<ProbePoint | null>(null);
   const [copiedCoords, setCopiedCoords] = useState<boolean>(false);
-  const [gpsTriggerCount, setGpsTriggerCount] = useState<number>(0);
   const [confirmDeleteSightingId, setConfirmDeleteSightingId] = useState<
     string | null
   >(null);
-  const [pendingFocusSector, setPendingFocusSector] = useState<{
-    lat: number;
-    lng: number;
-    zoom: number;
-  } | null>(null);
 
-  useEffect(() => {
-    if (BUILD_MAPS_API_KEY) return;
-    let active = true;
-    fetch('/api/cbls/maps-config')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { apiKey?: string } | null) => {
-        if (active && data?.apiKey) {
-          setMapsApiKey(data.apiKey);
-        }
-      })
-      .catch(() => {
-        // Offline or static-only host without backend config endpoint
-      })
-      .finally(() => {
-        if (active) setCheckingRuntimeKey(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const baseLayerGroupRef = useRef<L.LayerGroup | null>(null);
+  const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const probeLayerRef = useRef<L.LayerGroup | null>(null);
 
   const speciesLookup = useMemo<Record<string, SpeciesRecord>>(() => {
     const record: Record<string, SpeciesRecord> = {};
@@ -503,6 +240,245 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
     ? speciesLookup[activeSighting.speciesId]
     : null;
 
+  const resolveElevationAndSetProbe = useCallback(
+    async (
+      rawLat: number,
+      rawLng: number,
+      originLabel: string,
+      gpsAltitude?: number | null,
+    ) => {
+      const lat = Number(rawLat.toFixed(6));
+      const lng = Number(rawLng.toFixed(6));
+      const fallbackElev =
+        typeof gpsAltitude === 'number' && Number.isFinite(gpsAltitude)
+          ? Math.round(gpsAltitude)
+          : estimateCblsElevationFromCoords(lat, lng);
+
+      setProbePoint({
+        lat,
+        lng,
+        elevationM: fallbackElev,
+        holdridgeZone: detectHoldridgeZoneByElevation(fallbackElev),
+        elevationSource: 'modelo',
+        originLabel,
+      });
+
+      if (navigator.onLine) {
+        try {
+          const resp = await fetch(
+            `https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lng}`,
+          );
+          if (resp.ok) {
+            const payload = (await resp.json()) as { elevation?: number[] };
+            const demElev = payload?.elevation?.[0];
+            if (typeof demElev === 'number' && Number.isFinite(demElev)) {
+              const rounded = Math.max(0, Math.round(demElev));
+              setProbePoint({
+                lat,
+                lng,
+                elevationM: rounded,
+                holdridgeZone: detectHoldridgeZoneByElevation(rounded),
+                elevationSource: 'dem',
+                originLabel,
+              });
+            }
+          }
+        } catch {
+          // Keep offline/model elevation gracefully
+        }
+      }
+    },
+    [],
+  );
+
+  // Initialize Leaflet map once, always centered on Parque Central, San Marcos de Tarrazú
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container || mapInstanceRef.current) return;
+
+    const map = L.map(container, {
+      center: [PARQUE_CENTRAL_SAN_MARCOS.lat, PARQUE_CENTRAL_SAN_MARCOS.lng],
+      zoom: PARQUE_CENTRAL_SAN_MARCOS.zoom,
+      zoomControl: true,
+    });
+
+    L.control.scale({ imperial: false, metric: true }).addTo(map);
+
+    const baseGroup = buildLayerGroup('hybrid').addTo(map);
+    const markersGroup = L.layerGroup().addTo(map);
+    const probeGroup = L.layerGroup().addTo(map);
+
+    // Reference marker on Parque Central, San Marcos de Tarrazú
+    L.marker([PARQUE_CENTRAL_SAN_MARCOS.lat, PARQUE_CENTRAL_SAN_MARCOS.lng], {
+      icon: createLandmarkIcon(),
+      title: 'Parque Central, San Marcos de Tarrazú',
+    })
+      .bindPopup(
+        `<div style="font-family:sans-serif;color:#0f172a;">
+          <strong style="font-size:13px;">Parque Central, San Marcos de Tarrazú</strong><br/>
+          <span style="font-size:11px;color:#334155;">Punto de referencia inicial · CBLS</span><br/>
+          <span style="font-family:monospace;font-size:11px;">${PARQUE_CENTRAL_SAN_MARCOS.lat.toFixed(6)}, ${PARQUE_CENTRAL_SAN_MARCOS.lng.toFixed(6)}</span>
+        </div>`,
+      )
+      .addTo(map);
+
+    map.on('click', (ev: L.LeafletMouseEvent) => {
+      void resolveElevationAndSetProbe(
+        ev.latlng.lat,
+        ev.latlng.lng,
+        'Punto marcado en el mapa',
+      );
+    });
+
+    mapInstanceRef.current = map;
+    baseLayerGroupRef.current = baseGroup;
+    markersLayerRef.current = markersGroup;
+    probeLayerRef.current = probeGroup;
+
+    // Ensure tiles size cleanly once container settles
+    const resizeTimer = window.setTimeout(() => {
+      map.invalidateSize();
+    }, 150);
+
+    return () => {
+      window.clearTimeout(resizeTimer);
+      map.remove();
+      mapInstanceRef.current = null;
+      baseLayerGroupRef.current = null;
+      markersLayerRef.current = null;
+      probeLayerRef.current = null;
+    };
+  }, [resolveElevationAndSetProbe]);
+
+  // Swap basemap layer without losing map position or markers
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (baseLayerGroupRef.current) {
+      map.removeLayer(baseLayerGroupRef.current);
+    }
+    const nextGroup = buildLayerGroup(mapType);
+    nextGroup.addTo(map);
+    baseLayerGroupRef.current = nextGroup;
+  }, [mapType]);
+
+  // Sync filtered sighting markers onto the map
+  useEffect(() => {
+    const markersGroup = markersLayerRef.current;
+    if (!markersGroup) return;
+
+    markersGroup.clearLayers();
+
+    for (const obs of filteredSightings) {
+      const sp = speciesLookup[obs.speciesId];
+      const color = sp ? TAXON_COLOR_MAP[sp.taxon] : '#86E5B0';
+      const isSelected = selectedSightingId === obs.id;
+      const marker = L.marker([obs.latitude, obs.longitude], {
+        icon: createPinIcon(color, isSelected),
+        title: `${sp?.commonName || 'Avistamiento'} · ${obs.locality}`,
+      });
+
+      const popupHtml = `
+        <div style="min-width:190px;max-width:240px;font-family:sans-serif;color:#0f172a;line-height:1.35;">
+          <div style="font-size:13px;font-weight:700;">${escapeHtml(sp?.commonName || 'Especie registrada')}</div>
+          <div style="font-size:11px;font-style:italic;color:#475569;margin-bottom:4px;">${escapeHtml(sp?.scientificName || 'Indeterminado')}</div>
+          <div style="font-family:monospace;font-size:11px;color:#1e293b;">${obs.latitude.toFixed(6)}, ${obs.longitude.toFixed(6)}</div>
+          <div style="font-size:11px;color:#334155;">${obs.elevationM} m s.n.m. · ${obs.individualCount} ind.</div>
+          <div style="font-size:11px;font-weight:600;color:#1e293b;margin-top:2px;">Método: ${escapeHtml(obs.observationMethod || 'En persona')}</div>
+          <div style="font-size:11px;font-weight:600;color:#065f46;">Registró: ${escapeHtml(obs.observer)}</div>
+        </div>
+      `;
+
+      marker.bindPopup(popupHtml);
+      marker.on('click', () => {
+        setSelectedSightingId(obs.id);
+      });
+
+      marker.addTo(markersGroup);
+      if (isSelected) {
+        marker.openPopup();
+      }
+    }
+  }, [filteredSightings, speciesLookup, selectedSightingId]);
+
+  // Sync user probe pin onto the map
+  useEffect(() => {
+    const probeGroup = probeLayerRef.current;
+    if (!probeGroup) return;
+
+    probeGroup.clearLayers();
+    if (!probePoint) return;
+
+    L.marker([probePoint.lat, probePoint.lng], {
+      icon: createPinIcon('#86E5B0', true, true),
+      title: `Punto seleccionado: ${probePoint.lat.toFixed(6)}, ${probePoint.lng.toFixed(6)}`,
+    })
+      .bindPopup(
+        `<div style="font-family:sans-serif;color:#0f172a;">
+          <strong style="font-size:12px;">${escapeHtml(probePoint.originLabel)}</strong><br/>
+          <span style="font-family:monospace;font-size:11px;">${probePoint.lat.toFixed(6)}, ${probePoint.lng.toFixed(6)}</span><br/>
+          <span style="font-size:11px;">${probePoint.elevationM} m s.n.m. · ${escapeHtml(getHoldridgeZoneInfo(probePoint.holdridgeZone).shortName)}</span>
+        </div>`,
+      )
+      .addTo(probeGroup);
+  }, [probePoint]);
+
+  const handleFocusSector = (lat: number, lng: number, zoom: number) => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    map.flyTo([lat, lng], zoom, { duration: 0.65 });
+  };
+
+  const handleUseDeviceGps = () => {
+    const map = mapInstanceRef.current;
+    if (!('geolocation' in navigator)) {
+      if (map) {
+        map.flyTo(
+          [PARQUE_CENTRAL_SAN_MARCOS.lat, PARQUE_CENTRAL_SAN_MARCOS.lng],
+          16,
+        );
+      }
+      void resolveElevationAndSetProbe(
+        PARQUE_CENTRAL_SAN_MARCOS.lat,
+        PARQUE_CENTRAL_SAN_MARCOS.lng,
+        'Referencia Parque Central San Marcos',
+        1430,
+      );
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        if (map) {
+          map.flyTo([lat, lng], 16, { duration: 0.7 });
+        }
+        void resolveElevationAndSetProbe(
+          lat,
+          lng,
+          'GPS satelital del dispositivo',
+          pos.coords.altitude,
+        );
+      },
+      () => {
+        const lat = 9.5525;
+        const lng = -83.8065;
+        if (map) {
+          map.flyTo([lat, lng], 15, { duration: 0.7 });
+        }
+        void resolveElevationAndSetProbe(
+          lat,
+          lng,
+          'Referencia CBLS (sin permiso GPS)',
+          2240,
+        );
+      },
+      { enableHighAccuracy: true, timeout: 6000 },
+    );
+  };
+
   const handleCopyProbeCoords = async () => {
     if (!probePoint) return;
     const text = `${probePoint.lat.toFixed(6)}, ${probePoint.lng.toFixed(6)}`;
@@ -515,22 +491,6 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
     }
   };
 
-  const handleGpsLocated = useCallback(() => {
-    // Handled inside InteractiveMapCanvas probe state
-  }, []);
-
-  const handleConsumedFocus = useCallback(() => {
-    setPendingFocusSector(null);
-  }, []);
-
-  const handleParqueCentralResolved = useCallback(
-    (coords: { lat: number; lng: number }, label: string) => {
-      setParqueCentralCoords(coords);
-      setParqueCentralLabel(label);
-    },
-    [],
-  );
-
   return (
     <div className="space-y-5">
       {/* Top Toolbar */}
@@ -538,7 +498,7 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
-              Mapa SIG Real — Corredor Biológico Los Santos
+              Mapa SIG Interactivo — Corredor Biológico Los Santos
             </h2>
             <p className="text-xs text-muted">
               Haz clic en cualquier punto del mapa para obtener coordenadas WGS84
@@ -547,7 +507,7 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Basemap Type Switcher: Satélite, Híbrido, Calles, Terreno */}
+            {/* Basemap Type Switcher: Híbrido, Satélite, Calles, Terreno */}
             <div
               className="flex flex-wrap items-center rounded-lg border border-border bg-input p-1"
               role="group"
@@ -576,7 +536,7 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
 
             <Button
               tone="secondary"
-              onClick={() => setGpsTriggerCount((c) => c + 1)}
+              onClick={handleUseDeviceGps}
               className="min-h-10 px-3 text-xs"
             >
               <Crosshair className="h-4 w-4 text-primary" />
@@ -636,21 +596,11 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-muted">Sectores:</span>
-            {CBLS_SECTORS.map((sec, idx) => (
+            {CBLS_SECTORS.map((sec) => (
               <button
                 key={sec.name}
                 type="button"
-                onClick={() => {
-                  const coords =
-                    idx === 0 && parqueCentralCoords
-                      ? parqueCentralCoords
-                      : { lat: sec.lat, lng: sec.lng };
-                  setPendingFocusSector({
-                    lat: coords.lat,
-                    lng: coords.lng,
-                    zoom: sec.zoom,
-                  });
-                }}
+                onClick={() => handleFocusSector(sec.lat, sec.lng, sec.zoom)}
                 className="rounded-md border border-border bg-[#05140D] px-2 py-1 text-[11px] text-muted transition-colors hover:border-primary/45 hover:text-primary"
               >
                 {sec.name}
@@ -660,62 +610,23 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
         </div>
       </Surface>
 
-      {/* Main Split: Real Interactive Google Map + Exact Coordinate Inspector / Selected Sighting */}
+      {/* Main Split: Interactive Leaflet Map + Exact Coordinate Inspector / Selected Sighting */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         <Surface inset className="overflow-hidden lg:col-span-8">
           <div className="p-3">
-            {mapsApiKey ? (
-              <APIProvider
-                apiKey={mapsApiKey}
-                libraries={['marker', 'elevation', 'places']}
-                language="es"
-                region="CR"
-              >
-                <InteractiveMapCanvas
-                  mapType={mapType}
-                  filteredSightings={filteredSightings}
-                  speciesLookup={speciesLookup}
-                  selectedSightingId={selectedSightingId}
-                  onSelectSighting={(id) => setSelectedSightingId(id || null)}
-                  probePoint={probePoint}
-                  onSetProbePoint={setProbePoint}
-                  pendingFocusSector={pendingFocusSector}
-                  onConsumedFocus={handleConsumedFocus}
-                  onParqueCentralResolved={handleParqueCentralResolved}
-                  onGpsLocated={handleGpsLocated}
-                  gpsTriggerCount={gpsTriggerCount}
-                />
-              </APIProvider>
-            ) : checkingRuntimeKey ? (
-              <div className="flex h-[480px] flex-col items-center justify-center gap-3 rounded-control border border-border bg-[#05140D] p-6 text-center">
-                <MapPin className="h-8 w-8 animate-pulse text-primary" />
-                <p className="text-sm text-muted">
-                  Cargando configuración de Google Maps...
-                </p>
-              </div>
-            ) : (
-              <div className="flex h-[480px] flex-col items-center justify-center gap-3 rounded-control border border-border bg-[#05140D] p-6 text-center">
-                <MapPin className="h-8 w-8 text-primary" />
-                <h3 className="text-base font-semibold text-foreground">
-                  Clave de Google Maps pendiente de configuración
-                </h3>
-                <p className="max-w-md text-xs text-muted">
-                  Configura la variable de entorno{' '}
-                  <span className="font-mono text-primary">
-                    VITE_GOOGLE_MAPS_API_KEY
-                  </span>{' '}
-                  en el panel de ajustes o variables de entorno del servidor (por
-                  ejemplo en AI Studio Secrets o Vercel) y recarga/redespliega
-                  para mostrar el mapa centrado en Parque Central, San Marcos de
-                  Tarrazú.
-                </p>
-              </div>
-            )}
+            <div className="relative z-0 h-[460px] w-full overflow-hidden rounded-control border border-primary/20 bg-[#05140D] sm:h-[540px]">
+              <div
+                ref={mapContainerRef}
+                className="h-full w-full"
+                aria-label="Mapa SIG interactivo centrado en Parque Central de San Marcos de Tarrazú"
+              />
+            </div>
 
             <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted">
               <span>
-                Inicio: {parqueCentralLabel} · {filteredSightings.length}{' '}
-                avistamientos · Toca cualquier punto para obtener coordenadas
+                Inicio: Parque Central, San Marcos de Tarrazú ·{' '}
+                {filteredSightings.length} avistamientos · Toca cualquier punto
+                para obtener coordenadas
               </span>
               <span className="font-mono text-primary">Datum: WGS84</span>
             </div>
@@ -735,7 +646,7 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
               </div>
               {probePoint && (
                 <span className="rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[10px] font-semibold text-primary">
-                  {probePoint.elevationSource === 'google'
+                  {probePoint.elevationSource === 'dem'
                     ? 'Elevación real'
                     : 'Estimado CBLS'}
                 </span>
@@ -869,7 +780,10 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
                       {activeSighting.observationMethod || 'En persona'}
                     </span>
                     {activeSighting.sourceDetail ? (
-                      <span className="text-muted"> · {activeSighting.sourceDetail}</span>
+                      <span className="text-muted">
+                        {' '}
+                        · {activeSighting.sourceDetail}
+                      </span>
                     ) : null}
                   </p>
                   <p>
@@ -882,7 +796,8 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
                   </p>
                   {activeSighting.notes && (
                     <p className="pt-1 text-foreground/90">
-                      <span className="text-muted">Notas:</span> {activeSighting.notes}
+                      <span className="text-muted">Notas:</span>{' '}
+                      {activeSighting.notes}
                     </p>
                   )}
                   {activeSighting.localMediaSummary && (
@@ -1000,7 +915,9 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
                         </Button>
                         <Button
                           tone="coral"
-                          onClick={() => setConfirmDeleteSightingId(activeSighting.id)}
+                          onClick={() =>
+                            setConfirmDeleteSightingId(activeSighting.id)
+                          }
                           className="min-h-9 flex-1 text-xs"
                         >
                           <Trash2 className="h-3.5 w-3.5" />

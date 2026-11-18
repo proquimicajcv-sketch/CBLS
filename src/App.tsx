@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   BarChart3,
   BookOpen,
@@ -54,7 +54,6 @@ export default function App() {
   );
   const [startCatalogInCreate, setStartCatalogInCreate] =
     useState<boolean>(false);
-  const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState<boolean>(false);
 
   // User session identification modal
   const [userSessionModalOpen, setUserSessionModalOpen] = useState<boolean>(
@@ -76,14 +75,6 @@ export default function App() {
     holdridgeZone: HoldridgeZoneId;
     localityHint?: string;
   } | null>(null);
-
-  useEffect(() => {
-    const onQuotaExceeded = () => setMapsQuotaExceeded(true);
-    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
-    return () => {
-      window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
-    };
-  }, []);
 
   const handleOpenSpeciesDetail = useCallback((speciesId: string) => {
     setSelectedSpeciesId(speciesId);
@@ -192,24 +183,6 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <div className="min-h-dvh bg-background pb-24 text-foreground">
-        {/* Google Maps Platform Quota Exceeded Sticky Banner */}
-        {mapsQuotaExceeded && (
-          <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
-            <span>
-              Google Maps Platform quota reached. If you are the app owner, visit{' '}
-              <a
-                href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline font-semibold text-amber-950 hover:text-amber-800"
-              >
-                maps developer site
-              </a>{' '}
-              for instructions to update your account.
-            </span>
-          </div>
-        )}
-
         {/* Device User Session Modal */}
         <UserSessionModal
           open={userSessionModalOpen}

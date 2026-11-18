@@ -31,6 +31,16 @@ export function registerServiceWorker(): void {
   };
 
   const register = () => {
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let reloaded = false;
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController && !reloaded) {
+        reloaded = true;
+        window.location.reload();
+      }
+    });
+
     navigator.serviceWorker
       .register('/sw.js', { scope: '/' })
       .then((registration) => {
