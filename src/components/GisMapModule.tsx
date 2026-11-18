@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   APIProvider,
   APILoadingStatus,
@@ -75,16 +75,16 @@ const MAP_TYPES: Array<{
 ];
 
 const CBLS_SECTORS = [
+  { name: 'San Marcos (Parque Central)', lat: 9.6602, lng: -84.0209, zoom: 16 },
   { name: 'San Gerardo de Dota', lat: 9.5525, lng: -83.8065, zoom: 14 },
   { name: 'Santa María de Dota', lat: 9.6531, lng: -83.9708, zoom: 14 },
-  { name: 'San Marcos de Tarrazú', lat: 9.6602, lng: -84.0209, zoom: 14 },
   { name: 'San Pablo de León Cortés', lat: 9.6855, lng: -84.0419, zoom: 14 },
   { name: 'Cerro Buenavista', lat: 9.5562, lng: -83.7536, zoom: 14 },
 ];
 
-const CBLS_DEFAULT_CENTER = { lat: 9.61, lng: -83.9 };
+const CBLS_DEFAULT_CENTER = { lat: 9.6602, lng: -84.0209 };
 
-const MAPS_API_KEY =
+const BUILD_MAPS_API_KEY =
   (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) ||
   (typeof __GOOGLE_MAPS_API_KEY__ !== 'undefined'
     ? __GOOGLE_MAPS_API_KEY__
@@ -173,6 +173,7 @@ interface InteractiveMapCanvasProps {
   onSetProbePoint: (pt: ProbePoint | null) => void;
   pendingFocusSector: { lat: number; lng: number; zoom: number } | null;
   onConsumedFocus: () => void;
+  onParqueCentralResolved: (coords: { lat: number; lng: number }, label: string) => void;
   onGpsLocated: (lat: number, lng: number, altMeters?: number | null) => void;
   gpsTriggerCount: number;
 }
@@ -187,12 +188,15 @@ const InteractiveMapCanvas: React.FC<InteractiveMapCanvasProps> = ({
   onSetProbePoint,
   pendingFocusSector,
   onConsumedFocus,
+  onParqueCentralResolved,
   onGpsLocated,
   gpsTriggerCount,
 }) => {
   const map = useMap();
   const elevationLib = useMapsLibrary('elevation');
+  const placesLib = useMapsLibrary('places');
   const loadingStatus = useApiLoadingStatus();
+  const hasCenteredParqueRef = useRef<boolean>(false);
 
   const resolveElevationAndSetProbe = useCallback(
     async (
@@ -244,6 +248,46 @@ const InteractiveMapCanvas: React.FC<InteractiveMapCanvasProps> = ({
     },
     [elevationLib, onSetProbePoint],
   );
+
+  // Always start centered on Parque Central, San Marcos de Tarrazú via Places API (New)
+  useEffect(() => {
+    if (!map || !placesLib || hasCenteredParqueRef.current) return;
+    hasCenteredParqueRef.current = true;
+
+    let cancelled = false;
+    const centerOnParqueCentral = async () => {
+      try {
+        const { places } = await placesLib.Place.searchByText({
+          textQuery: 'Parque Central, San Marcos de Tarrazú, San José, Costa Rica',
+          fields: ['displayName', 'location'],
+          maxResultCount: 1,
+          language: 'es',
+          region: 'cr',
+        });
+        if (cancelled) return;
+        const target = places?.[0];
+        if (target?.location) {
+          const coords = {
+            lat: target.location.lat(),
+            lng: target.location.lng(),
+          };
+          map.setCenter(coords);
+          map.setZoom(16);
+          onParqueCentralResolved(
+            coords,
+            target.displayName || 'Parque Central, San Marcos de Tarrazú',
+          );
+        }
+      } catch {
+        // Keep San Marcos de Tarrazú default viewport gracefully
+      }
+    };
+
+    void centerOnParqueCentral();
+    return () => {
+      cancelled = true;
+    };
+  }, [map, placesLib, onParqueCentralResolved]);
 
   // Focus camera when a sector chip is clicked
   useEffect(() => {
@@ -340,7 +384,7 @@ const InteractiveMapCanvas: React.FC<InteractiveMapCanvasProps> = ({
         mapId="DEMO_MAP_ID"
         internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
         defaultCenter={CBLS_DEFAULT_CENTER}
-        defaultZoom={11}
+        defaultZoom={16}
         mapTypeId={mapType}
         gestureHandling="greedy"
         streetViewControl={true}
@@ -389,7 +433,18 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
   const [taxonFilter, setTaxonFilter] = useState<TaxonGroup | 'Todos'>('Todos');
   const [mapType, setMapType] = useState<GoogleMapTypeOption>('hybrid');
   const [selectedSightingId, setSelectedSightingId] = useState<string | null>(
-    sightings[0]?.id ?? null,
+    null,
+  );
+  const [mapsApiKey, setMapsApiKey] = useState<string>(BUILD_MAPS_API_KEY);
+  const [checkingRuntimeKey, setCheckingRuntimeKey] = useState<boolean>(
+    !BUILD_MAPS_API_KEY,
+  );
+  const [parqueCentralCoords, setParqueCentralCoords] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [parqueCentralLabel, setParqueCentralLabel] = useState<string>(
+    'Parque Central, San Marcos de Tarrazú',
   );
   const [probePoint, setProbePoint] = useState<ProbePoint | null>(null);
   const [copiedCoords, setCopiedCoords] = useState<boolean>(false);
@@ -402,6 +457,27 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
     lng: number;
     zoom: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (BUILD_MAPS_API_KEY) return;
+    let active = true;
+    fetch('/api/cbls/maps-config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { apiKey?: string } | null) => {
+        if (active && data?.apiKey) {
+          setMapsApiKey(data.apiKey);
+        }
+      })
+      .catch(() => {
+        // Offline or static-only host without backend config endpoint
+      })
+      .finally(() => {
+        if (active) setCheckingRuntimeKey(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const speciesLookup = useMemo<Record<string, SpeciesRecord>>(() => {
     const record: Record<string, SpeciesRecord> = {};
@@ -446,6 +522,14 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
   const handleConsumedFocus = useCallback(() => {
     setPendingFocusSector(null);
   }, []);
+
+  const handleParqueCentralResolved = useCallback(
+    (coords: { lat: number; lng: number }, label: string) => {
+      setParqueCentralCoords(coords);
+      setParqueCentralLabel(label);
+    },
+    [],
+  );
 
   return (
     <div className="space-y-5">
@@ -552,17 +636,21 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-muted">Sectores:</span>
-            {CBLS_SECTORS.map((sec) => (
+            {CBLS_SECTORS.map((sec, idx) => (
               <button
                 key={sec.name}
                 type="button"
-                onClick={() =>
+                onClick={() => {
+                  const coords =
+                    idx === 0 && parqueCentralCoords
+                      ? parqueCentralCoords
+                      : { lat: sec.lat, lng: sec.lng };
                   setPendingFocusSector({
-                    lat: sec.lat,
-                    lng: sec.lng,
+                    lat: coords.lat,
+                    lng: coords.lng,
                     zoom: sec.zoom,
-                  })
-                }
+                  });
+                }}
                 className="rounded-md border border-border bg-[#05140D] px-2 py-1 text-[11px] text-muted transition-colors hover:border-primary/45 hover:text-primary"
               >
                 {sec.name}
@@ -576,10 +664,10 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         <Surface inset className="overflow-hidden lg:col-span-8">
           <div className="p-3">
-            {MAPS_API_KEY ? (
+            {mapsApiKey ? (
               <APIProvider
-                apiKey={MAPS_API_KEY}
-                libraries={['marker', 'elevation']}
+                apiKey={mapsApiKey}
+                libraries={['marker', 'elevation', 'places']}
                 language="es"
                 region="CR"
               >
@@ -593,10 +681,18 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
                   onSetProbePoint={setProbePoint}
                   pendingFocusSector={pendingFocusSector}
                   onConsumedFocus={handleConsumedFocus}
+                  onParqueCentralResolved={handleParqueCentralResolved}
                   onGpsLocated={handleGpsLocated}
                   gpsTriggerCount={gpsTriggerCount}
                 />
               </APIProvider>
+            ) : checkingRuntimeKey ? (
+              <div className="flex h-[480px] flex-col items-center justify-center gap-3 rounded-control border border-border bg-[#05140D] p-6 text-center">
+                <MapPin className="h-8 w-8 animate-pulse text-primary" />
+                <p className="text-sm text-muted">
+                  Cargando configuración de Google Maps...
+                </p>
+              </div>
             ) : (
               <div className="flex h-[480px] flex-col items-center justify-center gap-3 rounded-control border border-border bg-[#05140D] p-6 text-center">
                 <MapPin className="h-8 w-8 text-primary" />
@@ -608,16 +704,18 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
                   <span className="font-mono text-primary">
                     VITE_GOOGLE_MAPS_API_KEY
                   </span>{' '}
-                  en el panel de ajustes de Google Maps para cargar la vista
-                  satelital y de calles interactiva.
+                  en el panel de ajustes o variables de entorno del servidor (por
+                  ejemplo en AI Studio Secrets o Vercel) y recarga/redespliega
+                  para mostrar el mapa centrado en Parque Central, San Marcos de
+                  Tarrazú.
                 </p>
               </div>
             )}
 
             <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted">
               <span>
-                Mostrando {filteredSightings.length} avistamientos en mapa real ·
-                Toca cualquier punto para obtener sus coordenadas exactas
+                Inicio: {parqueCentralLabel} · {filteredSightings.length}{' '}
+                avistamientos · Toca cualquier punto para obtener coordenadas
               </span>
               <span className="font-mono text-primary">Datum: WGS84</span>
             </div>

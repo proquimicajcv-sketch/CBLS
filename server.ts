@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -280,6 +281,15 @@ async function startServer() {
   // Authoritative state fetch
   app.get('/api/cbls/state', (_req: Request, res: Response) => {
     res.json(dbState);
+  });
+
+  // Runtime Google Maps browser key configuration (if injected at container runtime)
+  app.get('/api/cbls/maps-config', (_req: Request, res: Response) => {
+    const apiKey =
+      process.env.VITE_GOOGLE_MAPS_API_KEY ||
+      process.env.GOOGLE_MAPS_API_KEY ||
+      '';
+    res.json({ apiKey });
   });
 
   // Create or update a sample species (Requires Admin PIN 5531)
