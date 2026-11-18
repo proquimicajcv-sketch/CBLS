@@ -73,7 +73,12 @@ export interface SpeciesRecord {
   elevationM?: number;
   locality?: string;
   holdridgeZone?: HoldridgeZoneId;
-  activityCycle: 'Diurna' | 'Nocturna' | 'Crepuscular' | 'Permanente (Flora)';
+  activityCycle:
+    | 'Diurna'
+    | 'Nocturna'
+    | 'Crepuscular'
+    | 'Diurno/nocturno'
+    | 'Permanente (Flora)';
   ecology: EcologyFields;
   featuredNote?: string;
   updatedAt: string;

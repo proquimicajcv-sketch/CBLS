@@ -1058,6 +1058,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       <option value="Diurna">Diurna</option>
                       <option value="Nocturna">Nocturna</option>
                       <option value="Crepuscular">Crepuscular</option>
+                      <option value="Diurno/nocturno">Diurno/nocturno</option>
                       <option value="Permanente (Flora)">Permanente (Flora)</option>
                     </select>
                   </Field>

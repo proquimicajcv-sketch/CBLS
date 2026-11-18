@@ -147,7 +147,17 @@ export function toFirestoreSpeciesPayload(
     photoUrl: typeof raw.photoUrl === 'string' ? raw.photoUrl.trim().slice(0, 2000) : '',
     photoTag: raw.photoTag || 'Vista general',
     bioacoustics: bio,
-    activityCycle: raw.activityCycle || 'Diurna',
+    activityCycle:
+      raw.activityCycle &&
+      [
+        'Diurna',
+        'Nocturna',
+        'Crepuscular',
+        'Diurno/nocturno',
+        'Permanente (Flora)',
+      ].includes(raw.activityCycle)
+        ? raw.activityCycle
+        : 'Diurna',
     ecology: {
       chromaticsAnatomy: String(raw.ecology?.chromaticsAnatomy || '').slice(0, 8000),
       ethologyBehavior: String(raw.ecology?.ethologyBehavior || '').slice(0, 8000),
