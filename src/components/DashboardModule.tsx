@@ -415,16 +415,26 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                       Inventario desde 0
                     </span>{' '}
                     <span className="text-white/40">|</span>{' '}
-                    <span>Comienza tu catálogo de campo</span>
+                    <span>
+                      {currentUser?.isAdmin
+                        ? 'Comienza tu catálogo de campo'
+                        : 'Esperando fichas del administrador'}
+                    </span>
                   </p>
-                  <button
-                    type="button"
-                    onClick={onOpenNewSpecies}
-                    className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#A7E8C3]/30 bg-[#123326]/90 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#194735]"
-                  >
-                    <FilePlus2 className="h-3.5 w-3.5 text-[#B8EBD0]" />
-                    Agregar Primera Especie (URL y Ficha)
-                  </button>
+                  {currentUser?.isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={onOpenNewSpecies}
+                      className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#A7E8C3]/30 bg-[#123326]/90 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#194735]"
+                    >
+                      <FilePlus2 className="h-3.5 w-3.5 text-[#B8EBD0]" />
+                      Agregar Primera Especie (URL y Ficha)
+                    </button>
+                  ) : (
+                    <p className="text-xs text-white/75">
+                      Las fichas agregadas por el administrador aparecerán aquí automáticamente en tiempo real.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -456,7 +466,11 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
 
             <button
               type="button"
-              onClick={onOpenNewSpecies}
+              onClick={
+                currentUser?.isAdmin
+                  ? onOpenNewSpecies
+                  : () => onNavigate('fichas')
+              }
               className="flex items-center gap-3.5 rounded-xl border border-[#A7E8C3]/25 bg-[#0A2017]/74 px-4 py-4 text-left backdrop-blur-sm transition-colors hover:border-[#A7E8C3]/50 hover:bg-[#0E2B1F]/85"
             >
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#A7E8C3]/25 bg-[#123326] text-[#B8EBD0]">
@@ -464,10 +478,12 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-bold text-white">
-                  + Agregar Especie
+                  {currentUser?.isAdmin ? '+ Agregar Especie' : 'Fichas Técnicas'}
                 </span>
                 <span className="block truncate text-xs text-white/70">
-                  Nueva ficha en lista
+                  {currentUser?.isAdmin
+                    ? 'Nueva ficha en lista'
+                    : 'Observar especies fijadas'}
                 </span>
               </span>
             </button>

@@ -136,13 +136,14 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   const activeSpecies =
     species.find((s) => s.id === selectedSpeciesId) ?? species[0] ?? null;
 
+  const isAdmin = Boolean(currentUser?.isAdmin);
   const [mode, setMode] = useState<'view' | 'edit' | 'create'>(
-    startInCreateMode || species.length === 0 ? 'create' : 'view',
+    isAdmin && startInCreateMode ? 'create' : 'view',
   );
   const [draft, setDraft] = useState<SpeciesRecord>(() =>
-    startInCreateMode || !activeSpecies
+    isAdmin && (startInCreateMode || !activeSpecies)
       ? createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser)
-      : activeSpecies,
+      : (activeSpecies ?? createEmptySpeciesDraft(1, currentUser)),
   );
   const [listQuery, setListQuery] = useState<string>('');
 
@@ -169,12 +170,20 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   }, [species, listQuery]);
 
   useEffect(() => {
-    if (startInCreateMode || species.length === 0) {
+    if (!isAdmin && mode !== 'view') {
+      setMode('view');
+    }
+  }, [isAdmin, mode]);
+
+  useEffect(() => {
+    if (startInCreateMode && isAdmin) {
       setMode('create');
       setDraft(createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser));
       onClearCreateMode();
+    } else if (startInCreateMode && !isAdmin) {
+      onClearCreateMode();
     }
-  }, [startInCreateMode, species, currentUser, onClearCreateMode]);
+  }, [startInCreateMode, isAdmin, species, currentUser, onClearCreateMode]);
 
   useEffect(() => {
     if (mode === 'view' && activeSpecies) {
@@ -363,19 +372,21 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 Catálogo de especímenes
               </h2>
               <p className="text-xs text-muted">
-                {species.length} fichas biológicas guardadas
+                {species.length} fichas fijadas y sincronizadas
               </p>
             </div>
-            <Button
-              tone="primary"
-              onClick={() => {
-                setDraft(createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser));
-                setMode('create');
-              }}
-            >
-              <FilePlus2 className="h-4 w-4" />
-              Nueva especie
-            </Button>
+            {isAdmin && (
+              <Button
+                tone="primary"
+                onClick={() => {
+                  setDraft(createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser));
+                  setMode('create');
+                }}
+              >
+                <FilePlus2 className="h-4 w-4" />
+                Nueva especie
+              </Button>
+            )}
           </div>
 
           {species.length > 0 && (
@@ -494,7 +505,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     </p>
                     <span className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-muted">
                       <Lock className="h-3 w-3 text-secondary" />
-                      {currentUser?.isAdmin ? 'Acceso Administrador' : 'Edición restringida'}
+                      {isAdmin ? 'Acceso Administrador · Editable' : 'Ficha fijada · Solo lectura'}
                     </span>
                   </div>
 
@@ -582,14 +593,15 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     <Plus className="h-4 w-4" />
                     Registrar avistamiento
                   </Button>
-                  <Button
-                    tone="secondary"
-                    onClick={requestEditSpecies}
-                  >
-                    {!currentUser?.isAdmin && <Lock className="h-3.5 w-3.5 text-secondary" />}
-                    <Edit3 className="h-4 w-4" />
-                    Editar ficha
-                  </Button>
+                  {isAdmin && (
+                    <Button
+                      tone="secondary"
+                      onClick={requestEditSpecies}
+                    >
+                      <Edit3 className="h-4 w-4" />
+                      Editar ficha
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -850,36 +862,54 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
               </div>
             </div>
 
-            {/* Curation Footer & Protected Delete Button */}
+            {/* Curation Footer & Admin-Only Delete Button */}
             <div className="flex flex-wrap items-center justify-between gap-3 p-5">
               <span className="font-mono text-xs text-muted">
                 Actualizado: {activeSpecies.updatedAt.slice(0, 10)}
               </span>
 
-              {confirmAdminDelete ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-coral font-medium">
-                    ¿Eliminar ficha permanentemente?
-                  </span>
-                  <Button tone="quiet" onClick={() => setConfirmAdminDelete(false)}>
-                    Cancelar
-                  </Button>
-                  <Button tone="coral" onClick={executeAdminDelete}>
+              {isAdmin ? (
+                confirmAdminDelete ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-coral font-medium">
+                      ¿Eliminar ficha permanentemente?
+                    </span>
+                    <Button tone="quiet" onClick={() => setConfirmAdminDelete(false)}>
+                      Cancelar
+                    </Button>
+                    <Button tone="coral" onClick={executeAdminDelete}>
+                      <Trash2 className="h-4 w-4" />
+                      Confirmar eliminación
+                    </Button>
+                  </div>
+                ) : (
+                  <Button tone="coral" onClick={requestDeleteSpecies}>
                     <Trash2 className="h-4 w-4" />
-                    Confirmar eliminación
+                    Eliminar ficha
                   </Button>
-                </div>
+                )
               ) : (
-                <Button tone="coral" onClick={requestDeleteSpecies}>
-                  {!currentUser?.isAdmin && <Lock className="h-3.5 w-3.5" />}
-                  <Trash2 className="h-4 w-4" />
-                  Eliminar ficha
-                </Button>
+                <span className="inline-flex items-center gap-1.5 font-mono text-xs text-muted">
+                  <Lock className="h-3.5 w-3.5 text-secondary" />
+                  Ficha fijada · Solo Jorge C (Admin) puede editar o eliminar
+                </span>
               )}
             </div>
           </Surface>
+        ) : !isAdmin ? (
+          <Surface className="p-8 text-center space-y-3">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
+              <Lock className="h-5 w-5" />
+            </div>
+            <h2 className="text-lg font-semibold text-foreground">
+              Catálogo sincronizado en espera de fichas
+            </h2>
+            <p className="mx-auto max-w-md text-xs leading-relaxed text-muted">
+              Aún no hay fichas de especies cargadas. En cuanto el administrador agregue una especie con su código personal, aparecerá aquí automáticamente en tiempo real para que puedas observarla y registrar avistamientos.
+            </p>
+          </Surface>
         ) : (
-          /* Create / Edit Form View */
+          /* Create / Edit Form View (Admin Only) */
           <Surface>
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
               <div>

@@ -93,7 +93,7 @@ export default function App() {
   }, []);
 
   const handleOpenNewSpecies = useCallback(() => {
-    if (!store.userSession) {
+    if (!store.userSession?.isAdmin) {
       setUserSessionModalOpen(true);
       return;
     }

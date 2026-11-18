@@ -222,7 +222,7 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
             )}
           </div>
 
-          <div className="md:col-span-3">
+          <div className={currentUser?.isAdmin ? 'md:col-span-3' : 'md:col-span-5'}>
             <label htmlFor="curation-select" className="sr-only">
               Filtrar por estado de curaduría
             </label>
@@ -241,16 +241,18 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
             </select>
           </div>
 
-          <div className="md:col-span-2">
-            <Button
-              tone="primary"
-              onClick={onOpenNewSpecies}
-              className="w-full"
-            >
-              <Plus className="h-4 w-4" />
-              Nueva especie
-            </Button>
-          </div>
+          {currentUser?.isAdmin && (
+            <div className="md:col-span-2">
+              <Button
+                tone="primary"
+                onClick={onOpenNewSpecies}
+                className="w-full"
+              >
+                <Plus className="h-4 w-4" />
+                Nueva especie
+              </Button>
+            </div>
+          )}
         </div>
       </Surface>
 
@@ -281,7 +283,7 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                       className="h-full w-full"
                     />
                     <span className="absolute left-2.5 top-2.5 rounded-full border border-primary/35 bg-[#04110B]/90 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-primary">
-                      Muestra
+                      Muestra · Fijada
                     </span>
                   </div>
 
@@ -361,36 +363,38 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {confirmDeleteId === sp.id ? (
-                      <>
-                        <Button
-                          tone="quiet"
-                          onClick={() => setConfirmDeleteId(null)}
-                          className="min-h-9 px-2.5 text-xs"
+                    {currentUser?.isAdmin && (
+                      confirmDeleteId === sp.id ? (
+                        <>
+                          <Button
+                            tone="quiet"
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="min-h-9 px-2.5 text-xs"
+                          >
+                            Cancelar
+                          </Button>
+                          <Button
+                            tone="coral"
+                            onClick={() => {
+                              onDeleteSpecies(sp.id);
+                              setConfirmDeleteId(null);
+                            }}
+                            className="min-h-9 px-2.5 text-xs"
+                          >
+                            Confirmar
+                          </Button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          title="Eliminar especie"
+                          onClick={() => handleDeleteClick(sp)}
+                          className="p-2 text-muted hover:text-coral transition-colors"
+                          aria-label="Eliminar especie"
                         >
-                          Cancelar
-                        </Button>
-                        <Button
-                          tone="coral"
-                          onClick={() => {
-                            onDeleteSpecies(sp.id);
-                            setConfirmDeleteId(null);
-                          }}
-                          className="min-h-9 px-2.5 text-xs"
-                        >
-                          Confirmar
-                        </Button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        title="Eliminar especie"
-                        onClick={() => handleDeleteClick(sp)}
-                        className="p-2 text-muted hover:text-coral transition-colors"
-                        aria-label="Eliminar especie"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )
                     )}
                     <Button
                       tone="quiet"
@@ -435,9 +439,11 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                 Restablecer filtros
               </Button>
             )}
-            <Button tone="primary" onClick={onOpenNewSpecies}>
-              Agregar especie manualmente
-            </Button>
+            {currentUser?.isAdmin && (
+              <Button tone="primary" onClick={onOpenNewSpecies}>
+                Agregar especie manualmente
+              </Button>
+            )}
           </div>
         </Surface>
       )}

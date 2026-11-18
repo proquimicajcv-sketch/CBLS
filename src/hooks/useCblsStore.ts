@@ -449,7 +449,7 @@ export function useCblsStore() {
     [],
   );
 
-  // One-time upload of pre-existing local IndexedDB species
+  // One-time upload of pre-existing local IndexedDB species (admin) + enable IDB mirror on all devices
   const migrateLegacyLocalRecordsIfNeeded = useCallback(
     async (cloudSpeciesList: SpeciesRecord[]) => {
       if (migrationRanRef.current) return;
@@ -460,7 +460,11 @@ export function useCblsStore() {
       }
 
       const session = userSessionRef.current;
-      if (!session?.isAdmin) return;
+      if (!session?.isAdmin) {
+        idbMirrorReadyRef.current = true;
+        void idbReplaceAll(latestDataRef.current).catch(() => undefined);
+        return;
+      }
       migrationRanRef.current = true;
 
       try {
