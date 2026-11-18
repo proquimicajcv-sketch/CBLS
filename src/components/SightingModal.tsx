@@ -315,7 +315,7 @@ export const SightingModal: React.FC<SightingModalProps> = ({
               Registrar avistamiento en campo
             </h2>
             <p className="text-xs text-muted">
-              Observador registrado en historial:{' '}
+              Brigadista registrado en el equipo:{' '}
               <span className="font-semibold text-primary">
                 {currentUser?.observerName || 'Sin identificar'}
               </span>

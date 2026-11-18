@@ -714,7 +714,7 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
               <div className="space-y-3 p-5">
                 <p className="text-xs text-muted">
                   <span className="font-semibold text-primary">
-                    {activeSighting.observer}
+                    Brigadista: {activeSighting.observer}
                   </span>
                   {' · '}
                   <span>{activeSpecies?.taxon || 'Taxón'}</span>
@@ -770,6 +770,16 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
                     ({activeSighting.observedDate} ·{' '}
                     {activeSighting.observedTime})
                   </p>
+                  {activeSighting.notes && (
+                    <p className="pt-1 text-foreground/90">
+                      <span className="text-muted">Notas:</span> {activeSighting.notes}
+                    </p>
+                  )}
+                  {activeSighting.localMediaSummary && (
+                    <p className="font-mono text-[11px] text-secondary">
+                      Evidencia local: {activeSighting.localMediaSummary}
+                    </p>
+                  )}
 
                   {(activeSighting.photoUrl ||
                     activeSighting.videoUrl ||

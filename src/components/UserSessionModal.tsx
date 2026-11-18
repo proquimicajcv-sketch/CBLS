@@ -72,19 +72,19 @@ export const UserSessionModal: React.FC<UserSessionModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <p className="text-xs text-foreground/85 leading-relaxed">
-            Ingresa tu nombre y uno de los códigos de acceso asignados para el Corredor Biológico Los Santos.{' '}
+            Ingresa tu nombre o identificador de brigadista y uno de los códigos de acceso asignados para el Corredor Biológico Los Santos.{' '}
             <span className="text-secondary font-medium">
-              Solo tu nombre quedará registrado en el historial de cambios y avistamientos.
+              Tu nombre quedará vinculado a cada avistamiento y cambio para la vista consolidada del equipo.
             </span>
           </p>
 
-          <Field label="Nombre de la persona" htmlFor="observer-name-input">
+          <Field label="Nombre o ID del brigadista" htmlFor="observer-name-input">
             <input
               id="observer-name-input"
               type="text"
               required
               autoFocus
-              placeholder="Ej. Valeria Mora / Juan Calderón"
+              placeholder="Ej. Valeria Mora / Brigadista 03"
               value={name}
               onChange={(e) => {
                 setName(e.target.value);

@@ -70,8 +70,36 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   const [activityTab, setActivityTab] = useState<'sightings' | 'history'>(
     'sightings',
   );
+  const [selectedBrigadista, setSelectedBrigadista] = useState<string>('Todos');
+  const [showAllSightings, setShowAllSightings] = useState<boolean>(false);
 
   const featuredSpecies = species[0] ?? null;
+
+  const brigadistaSummary = React.useMemo(() => {
+    const map = new Map<string, { sightings: number; individuals: number }>();
+    for (const s of sightings) {
+      const name = (s.observer || 'Observador CBLS').trim();
+      const prev = map.get(name) ?? { sightings: 0, individuals: 0 };
+      map.set(name, {
+        sightings: prev.sightings + 1,
+        individuals: prev.individuals + s.individualCount,
+      });
+    }
+    return Array.from(map.entries())
+      .map(([name, stats]) => ({ name, ...stats }))
+      .sort((a, b) => b.sightings - a.sightings);
+  }, [sightings]);
+
+  const filteredTeamSightings = React.useMemo(() => {
+    if (selectedBrigadista === 'Todos') return sightings;
+    return sightings.filter(
+      (s) => (s.observer || 'Observador CBLS').trim() === selectedBrigadista,
+    );
+  }, [sightings, selectedBrigadista]);
+
+  const visibleTeamSightings = showAllSightings
+    ? filteredTeamSightings
+    : filteredTeamSightings.slice(0, 8);
 
   const faunaCount = species.filter((s) => s.taxon !== 'Plantas').length;
   const floraCount = species.filter((s) => s.taxon === 'Plantas').length;
@@ -480,129 +508,201 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3 p-5">
             <div>
               <h2 className="text-lg font-semibold text-foreground">
-                Actividad en el corredor
+                Avistamientos Consolidados del Equipo
               </h2>
               <p className="text-xs text-muted">
-                Registro colaborativo por nombre de observador en tiempo real
+                Registros centralizados de todos los brigadistas ·{' '}
+                <span className="font-mono text-secondary">
+                  {brigadistaSummary.length} brigadista(s) · {sightings.filter((s) => s.synced).length}/{sightings.length} sincronizados
+                </span>
               </p>
             </div>
 
-            <div
-              className="flex items-center gap-2"
-              role="tablist"
-              aria-label="Vista de actividad"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activityTab === 'sightings'}
-                onClick={() => setActivityTab('sightings')}
-                className={`min-h-9 rounded-control border px-3 text-xs font-medium transition-colors ${
-                  activityTab === 'sightings'
-                    ? 'border-primary bg-primary font-semibold text-primary-foreground'
-                    : 'border-border bg-input text-muted hover:text-foreground'
-                }`}
+            <div className="flex flex-wrap items-center gap-2">
+              {activityTab === 'sightings' && brigadistaSummary.length > 0 && (
+                <select
+                  aria-label="Filtrar por brigadista"
+                  value={selectedBrigadista}
+                  onChange={(e) => setSelectedBrigadista(e.target.value)}
+                  className="min-h-9 rounded-control border border-border bg-input px-2.5 text-xs text-foreground"
+                >
+                  <option value="Todos">
+                    Todos los brigadistas ({sightings.length})
+                  </option>
+                  {brigadistaSummary.map((b) => (
+                    <option key={b.name} value={b.name}>
+                      {b.name} ({b.sightings} avist. · {b.individuals} ind.)
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              <div
+                className="flex items-center gap-2"
+                role="tablist"
+                aria-label="Vista de actividad"
               >
-                Avistamientos ({sightings.length})
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activityTab === 'history'}
-                onClick={() => setActivityTab('history')}
-                className={`inline-flex min-h-9 items-center gap-1.5 rounded-control border px-3 text-xs font-medium transition-colors ${
-                  activityTab === 'history'
-                    ? 'border-primary bg-primary font-semibold text-primary-foreground'
-                    : 'border-border bg-input text-muted hover:text-foreground'
-                }`}
-              >
-                <History className="h-3.5 w-3.5" />
-                Historial ({changeLogs.length})
-              </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activityTab === 'sightings'}
+                  onClick={() => setActivityTab('sightings')}
+                  className={`min-h-9 rounded-control border px-3 text-xs font-medium transition-colors ${
+                    activityTab === 'sightings'
+                      ? 'border-primary bg-primary font-semibold text-primary-foreground'
+                      : 'border-border bg-input text-muted hover:text-foreground'
+                  }`}
+                >
+                  Equipo ({sightings.length})
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activityTab === 'history'}
+                  onClick={() => setActivityTab('history')}
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-control border px-3 text-xs font-medium transition-colors ${
+                    activityTab === 'history'
+                      ? 'border-primary bg-primary font-semibold text-primary-foreground'
+                      : 'border-border bg-input text-muted hover:text-foreground'
+                  }`}
+                >
+                  <History className="h-3.5 w-3.5" />
+                  Historial ({changeLogs.length})
+                </button>
+              </div>
             </div>
           </div>
 
+          {activityTab === 'sightings' && brigadistaSummary.length > 1 && (
+            <div className="flex flex-wrap items-center gap-2 bg-[#04140D] px-5 py-2.5 text-xs">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-muted">
+                Brigadistas:
+              </span>
+              {brigadistaSummary.map((b) => {
+                const active = selectedBrigadista === b.name;
+                return (
+                  <button
+                    key={b.name}
+                    type="button"
+                    onClick={() =>
+                      setSelectedBrigadista((prev) => (prev === b.name ? 'Todos' : b.name))
+                    }
+                    className={`rounded-md border px-2 py-0.5 font-mono text-[11px] transition-colors ${
+                      active
+                        ? 'border-primary bg-primary/20 text-primary'
+                        : 'border-border bg-surface text-foreground/85 hover:border-primary/40'
+                    }`}
+                  >
+                    {b.name}: {b.sightings}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="divide-y divide-border">
             {activityTab === 'sightings' ? (
-              sightings.length === 0 ? (
+              filteredTeamSightings.length === 0 ? (
                 <div className="p-6 text-center text-xs text-muted">
                   No hay avistamientos registrados todavía. Usa el botón{' '}
                   <strong className="text-primary">+</strong> en la barra
                   inferior o selecciona un punto exacto en el Mapa SIG.
                 </div>
               ) : (
-                sightings.slice(0, 6).map((obs) => {
-                  const sp = speciesMap.get(obs.speciesId);
-                  return (
-                    <button
-                      key={obs.id}
-                      type="button"
-                      onClick={() => sp && onOpenSpeciesDetail(sp.id)}
-                      className="flex w-full items-start justify-between gap-3 px-5 py-3.5 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-primary"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                          <span className="max-w-[180px] truncate font-semibold text-primary">
-                            {obs.observer}
-                          </span>
-                          <span className="text-muted">·</span>
-                          <span className="text-muted">{obs.locality}</span>
-                        </div>
-                        <p className="mt-0.5 text-sm font-semibold text-foreground">
-                          {sp?.commonName ?? 'Especie registrada'}{' '}
-                          <span className="font-normal italic text-muted">
-                            ({sp?.scientificName ?? 'Indet.'})
-                          </span>
-                        </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
-                          <span className="rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary">
-                            {obs.observationMethod || 'En persona'}
-                          </span>
-                          {!obs.synced && (
-                            <span className="rounded border border-coral/40 bg-coral/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-coral">
-                              Offline · Pendiente
+                <>
+                  {visibleTeamSightings.map((obs) => {
+                    const sp = speciesMap.get(obs.speciesId);
+                    return (
+                      <button
+                        key={obs.id}
+                        type="button"
+                        onClick={() => sp && onOpenSpeciesDetail(sp.id)}
+                        className="flex w-full items-start justify-between gap-3 px-5 py-3.5 text-left transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-primary"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                            <span className="max-w-[210px] truncate font-semibold text-primary">
+                              Brigadista: {obs.observer}
                             </span>
-                          )}
-                          {obs.sourceDetail && (
-                            <span className="truncate max-w-[180px] text-foreground/80">
-                              {obs.sourceDetail}
+                            <span className="text-muted">·</span>
+                            <span className="text-muted">{obs.locality}</span>
+                          </div>
+                          <p className="mt-0.5 text-sm font-semibold text-foreground">
+                            {sp?.commonName ?? 'Especie registrada'}{' '}
+                            <span className="font-normal italic text-muted">
+                              ({sp?.scientificName ?? 'Indet.'})
                             </span>
-                          )}
-                          <span>· {obs.weatherCondition}</span>
-                          {(obs.photoUrl || obs.localPhotoId) && (
-                            <Camera className="h-3 w-3 text-secondary" />
-                          )}
-                          {(obs.videoUrl || obs.localVideoId) && (
-                            <Video className="h-3 w-3 text-primary" />
-                          )}
-                          {obs.audioUrl && (
-                            <Volume2 className="h-3 w-3 text-coral" />
-                          )}
-                          {obs.localMediaSummary && (
-                            <span className="font-mono text-[11px] text-secondary">
-                              · {obs.localMediaSummary}
-                            </span>
-                          )}
-                        </div>
-                        {obs.notes && (
-                          <p className="mt-1.5 line-clamp-2 text-xs text-foreground/80">
-                            Notas: {obs.notes}
                           </p>
-                        )}
-                      </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
+                            <span className="rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary">
+                              {obs.observationMethod || 'En persona'}
+                            </span>
+                            {obs.synced ? (
+                              <span className="rounded border border-secondary/30 bg-secondary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-secondary">
+                                Sincronizado Firebase
+                              </span>
+                            ) : (
+                              <span className="rounded border border-coral/40 bg-coral/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-coral">
+                                Offline · Pendiente
+                              </span>
+                            )}
+                            {obs.sourceDetail && (
+                              <span className="truncate max-w-[180px] text-foreground/80">
+                                {obs.sourceDetail}
+                              </span>
+                            )}
+                            <span>· {obs.weatherCondition}</span>
+                            {(obs.photoUrl || obs.localPhotoId) && (
+                              <Camera className="h-3 w-3 text-secondary" />
+                            )}
+                            {(obs.videoUrl || obs.localVideoId) && (
+                              <Video className="h-3 w-3 text-primary" />
+                            )}
+                            {obs.audioUrl && (
+                              <Volume2 className="h-3 w-3 text-coral" />
+                            )}
+                            {obs.localMediaSummary && (
+                              <span className="font-mono text-[11px] text-secondary">
+                                · {obs.localMediaSummary}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 font-mono text-[11px] text-muted">
+                            GPS: {obs.latitude.toFixed(5)}°, {obs.longitude.toFixed(5)}° · {obs.elevationM} m
+                          </p>
+                          {obs.notes && (
+                            <p className="mt-1 line-clamp-2 text-xs text-foreground/80">
+                              Notas: {obs.notes}
+                            </p>
+                          )}
+                        </div>
 
-                      <div className="shrink-0 text-right font-mono text-xs">
-                        <span className="font-semibold text-primary">
-                          {obs.individualCount} ind.
-                        </span>
-                        <p className="mt-0.5 text-muted">{obs.elevationM} m</p>
-                        <p className="text-muted/80">
-                          {obs.observedDate} · {obs.observedTime}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })
+                        <div className="shrink-0 text-right font-mono text-xs">
+                          <span className="font-semibold text-primary">
+                            {obs.individualCount} ind.
+                          </span>
+                          <p className="mt-0.5 text-muted">{obs.elevationM} m</p>
+                          <p className="text-muted/80">
+                            {obs.observedDate} · {obs.observedTime}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {filteredTeamSightings.length > 8 && (
+                    <div className="flex justify-center p-3">
+                      <Button
+                        tone="quiet"
+                        onClick={() => setShowAllSightings((v) => !v)}
+                        className="min-h-9 text-xs"
+                      >
+                        {showAllSightings
+                          ? 'Mostrar solo recientes (8)'
+                          : `Ver todos los avistamientos del equipo (${filteredTeamSightings.length})`}
+                      </Button>
+                    </div>
+                  )}
+                </>
               )
             ) : changeLogs.length === 0 ? (
               <div className="p-6 text-center text-xs text-muted">
@@ -611,7 +711,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                 persona.
               </div>
             ) : (
-              changeLogs.slice(0, 8).map((log) => (
+              changeLogs.slice(0, 12).map((log) => (
                 <div
                   key={log.id}
                   className="flex items-start justify-between gap-3 px-5 py-3 text-xs"
