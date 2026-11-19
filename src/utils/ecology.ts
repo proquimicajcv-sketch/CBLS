@@ -151,6 +151,213 @@ export const TAXON_COLOR_MAP: Record<TaxonGroup, string> = {
   Insectos: '#7cc6fe',
 };
 
+export const VALID_ACTIVITY_CYCLES = [
+  'Diurna',
+  'Nocturna',
+  'Crepuscular',
+  'Diurno/nocturno',
+  'Permanente (Flora)',
+  'Floración',
+  'Fructificación',
+  'Vegetativa',
+  'Con esporofitos',
+  'Floración y brotes',
+] as const;
+
+export const FAUNA_ACTIVITY_CYCLES = [
+  'Diurna',
+  'Nocturna',
+  'Crepuscular',
+  'Diurno/nocturno',
+  'Permanente (Flora)',
+] as const;
+
+export const FLORA_PHENOLOGY_CYCLES = [
+  'Permanente (Flora)',
+  'Floración',
+  'Fructificación',
+  'Vegetativa',
+  'Con esporofitos',
+  'Floración y brotes',
+] as const;
+
+export const FAUNA_PHOTO_TAGS = [
+  'Vista general',
+  'Ojo',
+  'Flanco',
+  'Dorso',
+  'Puesta',
+  'Hembra',
+  'Macho',
+  'Floración / Fruto',
+] as const;
+
+export const FLORA_PHOTO_TAGS = [
+  'Vista general',
+  'Floración / Fruto',
+  'Hoja / Follaje',
+  'Corteza / Tallo',
+  'Detalle floral',
+  'Cápsula / Esporofito',
+] as const;
+
+export function isPlantTaxon(taxon?: TaxonGroup | null): boolean {
+  return taxon === 'Plantas';
+}
+
+export interface KingdomSchemaConfig {
+  isPlant: boolean;
+  kingdomLabel: string;
+  codePrefix: string;
+  taxonGroupLabel: string;
+  botanicalGroupLabel: string;
+  botanicalGroupPlaceholder: string;
+  activityLabel: string;
+  alertCheckboxLabel: string;
+  alertBadgeShort: string;
+  alertDetailLabel: string;
+  abundanceLabel: string;
+  abundancePlaceholder: string;
+  photoTagLabel: string;
+  macroOrExtraUrlLabel: string;
+  macroOrExtraUrlHint: string;
+  macroOrExtraUrlPlaceholder: string;
+  substrateOrBioHeader: string;
+  substrateOrBioNotesLabel: string;
+  substrateOrBioPlaceholder: string;
+  ecologySectionTitle: string;
+  eco1Label: string;
+  eco1Hint: string;
+  eco2Label: string;
+  eco2Hint: string;
+  eco3Label: string;
+  eco3Hint: string;
+  eco4Label: string;
+  eco4Hint: string;
+  eco5Label: string;
+}
+
+export function getKingdomSchema(taxon?: TaxonGroup | null): KingdomSchemaConfig {
+  if (taxon === 'Plantas') {
+    return {
+      isPlant: true,
+      kingdomLabel: 'Flora (Plantae)',
+      codePrefix: 'CBLS-FL-',
+      taxonGroupLabel: 'Reino / División taxonómica',
+      botanicalGroupLabel: 'Grupo botánico / Forma de vida',
+      botanicalGroupPlaceholder:
+        'Ej. Fagaceae (Árbol) / Orchidaceae (Orquídea epífita) / Sphagnaceae (Musgo)',
+      activityLabel: 'Fenología observada',
+      alertCheckboxLabel: 'Alerta endémica / veda / toxicidad',
+      alertBadgeShort: 'Veda / Endémica',
+      alertDetailLabel: '▲ Endémica / veda / toxicidad',
+      abundanceLabel: 'Individuos / Cobertura observada',
+      abundancePlaceholder: 'Ej. 1 ind. adulto / Colonia de 4 ind. / Parche de 1.5 m²',
+      photoTagLabel: 'Etiqueta diagnóstica botánica de la foto',
+      macroOrExtraUrlLabel: 'URL de Fotografía Macro / Herbario (opcional)',
+      macroOrExtraUrlHint: 'Detalle de hoja, flor, corteza o pliego de herbario',
+      macroOrExtraUrlPlaceholder: 'https://ejemplo.com/macro_hoja_o_flor.jpg',
+      substrateOrBioHeader: 'Microhábitat y sustrato (Forófito / Exposición)',
+      substrateOrBioNotesLabel: 'Microhábitat y sustrato (Forófito / Exposición)',
+      substrateOrBioPlaceholder:
+        'Tipo de sustrato (terrestre, epífito en roble, litófito), humedad, suelo y exposición lumínica...',
+      ecologySectionTitle: 'Campos de investigación botánica y ecología',
+      eco1Label: 'Morfología y cromática diagnóstica',
+      eco1Hint: 'Porte, tronco/corteza, hojas, nervadura, flor, fruto, cápsula o esporofito',
+      eco2Label: 'Fisiología y adaptaciones al sitio',
+      eco2Hint: 'Cutícula, tolerancia a neblina, radiación UV, heladas o epifitismo',
+      eco3Label: 'Fenología, polinización y dispersión',
+      eco3Hint: 'Polinizadores, época de floración/fructificación y dispersión de semillas o esporas',
+      eco4Label: 'Relaciones ecológicas y simbiosis (micorrizas / forófitos)',
+      eco4Hint: 'Micorrizas, forófitos hospederos, epífitas asociadas o fauna dispersora',
+      eco5Label: 'Datos científicos confirmados y literatura regional',
+    };
+  }
+
+  return {
+    isPlant: false,
+    kingdomLabel: 'Fauna (Animalia)',
+    codePrefix: 'CBLS-SP-',
+    taxonGroupLabel: 'Grupo taxonómico',
+    botanicalGroupLabel: 'Subgrupo / Familia (opcional)',
+    botanicalGroupPlaceholder: 'Ej. Accipitridae / Trogonidae / Viperidae',
+    activityLabel: 'Horario de actividad',
+    alertCheckboxLabel: 'Alerta ofídica / veneno / prioritario',
+    alertBadgeShort: 'Ofídico',
+    alertDetailLabel: '▲ Venenosa / interés médico',
+    abundanceLabel: 'Individuos observados en muestra (opcional)',
+    abundancePlaceholder: 'Ej. 1 ind. (Solitario o en pareja)',
+    photoTagLabel: 'Etiqueta anatómica de la foto',
+    macroOrExtraUrlLabel: 'URL de Canto / Audio (opcional)',
+    macroOrExtraUrlHint: 'MP3, WAV o enlace sonoro',
+    macroOrExtraUrlPlaceholder: 'https://ejemplo.com/canto_macho.mp3',
+    substrateOrBioHeader: 'Registro bioacústico de referencia',
+    substrateOrBioNotesLabel: 'Notas de bioacústica y contexto de emisión',
+    substrateOrBioPlaceholder:
+      'Describe vocalizaciones, llamadas de alarma o contexto de emisión...',
+    ecologySectionTitle: 'Campos de investigación biológica y ecología',
+    eco1Label: 'Cromática y anatomía del espécimen',
+    eco1Hint: 'Morfología diagnóstica, patrones de color, escamación o plumaje',
+    eco2Label: 'Etología y comportamiento en sitio',
+    eco2Hint: 'Termorregulación, estrato vertical, forrajeo y desplazamiento',
+    eco3Label: 'Cortejo, reproducción y cuidado parental',
+    eco3Hint: 'Época reproductiva, nidación, puesta o cuidado de crías',
+    eco4Label: 'Relaciones intra e interespecíficas',
+    eco4Hint: 'Competencia, depredación, bandadas mixtas o dispersión',
+    eco5Label: 'Datos científicos confirmados y literatura regional',
+  };
+}
+
+export function formatSpeciesMarkdown(sp: SpeciesRecord): string {
+  const cfg = getKingdomSchema(sp.taxon);
+  const checkAlert = sp.medicalAlert ? '[X]' : '[ ]';
+  const groupText = sp.botanicalGroup
+    ? `${sp.taxon} — ${sp.botanicalGroup}`
+    : sp.taxon;
+
+  return `### **Taxonomía y datos básicos de curaduría**
+* **Reino biológico:** ${cfg.kingdomLabel}
+* **Nombre científico (binomio):** *${sp.scientificName}*
+* **Nombre común / vernáculo:** ${sp.commonName}
+* **${cfg.isPlant ? cfg.botanicalGroupLabel : cfg.taxonGroupLabel}:** ${groupText}
+* **Código de catálogo CBLS:** ${sp.catalogCode}
+* **Categoría Lista Roja UICN:** ${sp.iucn}
+* **Estado de curaduría:** ${sp.curationStatus}
+* **${cfg.activityLabel}:** ${sp.activityCycle}
+* **${cfg.alertCheckboxLabel}:** \`${checkAlert}\`
+
+---
+
+### **Multimedia y registros**
+${sp.initialAbundanceNote ? `* **${cfg.abundanceLabel}:** ${sp.initialAbundanceNote}\n` : ''}* **URL de Fotografía Principal:** \`${sp.photoUrl || 'No registrada'}\`
+* **${cfg.photoTagLabel}:** ${sp.photoTag}
+${cfg.isPlant ? `* **${cfg.macroOrExtraUrlLabel}:** \`${sp.macroPhotoUrl || 'No aplica'}\`\n* **URL de Video (opcional):** \`${sp.videoUrl || 'No aplica'}\`` : `* **URL de Video (opcional):** \`${sp.videoUrl || 'No aplica'}\`\n* **URL de Canto / Audio (opcional):** \`${sp.bioacoustics.audioUrl || 'No aplica'}\``}
+
+---
+
+### **${cfg.substrateOrBioNotesLabel}**
+${sp.bioacoustics.notes || 'Sin notas registradas.'}
+
+---
+
+### **${cfg.ecologySectionTitle}**
+
+* **${cfg.eco1Label}:**
+  ${sp.ecology.chromaticsAnatomy || 'Pendiente de curaduría.'}
+
+* **${cfg.eco2Label}:**
+  ${sp.ecology.ethologyBehavior || 'Pendiente de curaduría.'}
+
+* **${cfg.eco3Label}:**
+  ${sp.ecology.courtshipReproduction || 'Pendiente de curaduría.'}
+
+* **${cfg.eco4Label}:**
+  ${sp.ecology.interIntraRelations || 'Pendiente de curaduría.'}
+
+* **${cfg.eco5Label}:**
+  ${sp.ecology.confirmedReferences || 'Pendiente de curaduría.'}`;
+}
+
 export function getHoldridgeZoneInfo(id: HoldridgeZoneId): HoldridgeZoneInfo {
   return HOLDRIDGE_ZONES.find((z) => z.id === id) ?? HOLDRIDGE_ZONES[1];
 }

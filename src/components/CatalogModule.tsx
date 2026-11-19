@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Check,
+  Copy,
   Edit3,
   FilePlus2,
+  Leaf,
   Lock,
   MapPin,
+  PawPrint,
   Plus,
   Search,
   Square,
@@ -20,7 +24,13 @@ import type {
   UserSession,
 } from '../types/cbls';
 import {
+  FAUNA_ACTIVITY_CYCLES,
+  FAUNA_PHOTO_TAGS,
+  FLORA_PHENOLOGY_CYCLES,
+  FLORA_PHOTO_TAGS,
+  formatSpeciesMarkdown,
   getHoldridgeZoneInfo,
+  getKingdomSchema,
   playBioacousticPreview,
   TAXON_GROUPS,
 } from '../utils/ecology';
@@ -52,59 +62,59 @@ interface CatalogModuleProps {
   onDeleteSighting: (sightingId: string) => Promise<boolean> | void;
 }
 
-const PHOTO_TAGS: PhotoTag[] = [
-  'Vista general',
-  'Ojo',
-  'Flanco',
-  'Dorso',
-  'Puesta',
-  'Hembra',
-  'Macho',
-  'Floración / Fruto',
-];
-
 const IUCN_OPTIONS: { code: IucnCategory; label: string }[] = [
   { code: 'LC', label: 'LC — Preocupación menor' },
-  { code: 'NT', label: 'NT — Casi amenazada' },
+  { code: 'NT', label: 'NT — Casi amenazado' },
   { code: 'VU', label: 'VU — Vulnerable' },
   { code: 'EN', label: 'EN — En peligro' },
   { code: 'CR', label: 'CR — En peligro crítico' },
 ];
 
-function getNextCatalogIndex(speciesList: SpeciesRecord[]): number {
+function getNextCatalogIndex(speciesList: SpeciesRecord[], prefix = 'CBLS-'): number {
   let maxNum = speciesList.length;
   for (const sp of speciesList) {
+    if (prefix === 'CBLS-FL-' && !sp.catalogCode.startsWith('CBLS-FL-')) continue;
     const match = sp.catalogCode.match(/(\d+)$/);
     if (match) {
       const n = parseInt(match[1], 10);
       if (Number.isFinite(n) && n > maxNum) maxNum = n;
     }
   }
-  return maxNum + 1;
+  return prefix === 'CBLS-FL-'
+    ? speciesList.filter((s) => s.taxon === 'Plantas' || s.catalogCode.startsWith('CBLS-FL-')).length + 1
+    : maxNum + 1;
 }
 
-function createEmptySpeciesDraft(nextIndex: number, user: UserSession | null): SpeciesRecord {
+function createEmptySpeciesDraft(
+  nextIndex: number,
+  user: UserSession | null,
+  kingdom: 'Animalia' | 'Plantae' = 'Animalia',
+): SpeciesRecord {
+  const isPlant = kingdom === 'Plantae';
   return {
     id: `sp-${Date.now()}`,
-    catalogCode: `CBLS-SP-${String(nextIndex).padStart(3, '0')}`,
+    catalogCode: `${isPlant ? 'CBLS-FL' : 'CBLS-SP'}-${String(nextIndex).padStart(3, '0')}`,
     scientificName: '',
     commonName: '',
-    taxon: 'Aves',
+    taxon: isPlant ? 'Plantas' : 'Aves',
+    botanicalGroup: '',
     iucn: 'LC',
     medicalAlert: false,
     curationStatus: 'Borrador local',
     isSample: true,
     photoUrl: '',
     videoUrl: '',
+    macroPhotoUrl: '',
     photoTag: 'Vista general',
+    initialAbundanceNote: '',
     bioacoustics: {
       hasCall: false,
       audioUrl: '',
       dominantFreqKhz: 2.4,
       pulsePattern: 'pulse',
-      notes: 'No aplica (Sin canto).',
+      notes: isPlant ? '' : 'No aplica (Sin canto).',
     },
-    activityCycle: 'Diurna',
+    activityCycle: isPlant ? 'Permanente (Flora)' : 'Diurna',
     ecology: {
       chromaticsAnatomy: '',
       ethologyBehavior: '',
@@ -156,6 +166,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
   const [isPlayingCall, setIsPlayingCall] = useState<boolean>(false);
   const [stopAudio, setStopAudio] = useState<(() => void) | null>(null);
+  const [copiedMode, setCopiedMode] = useState<'markdown' | 'json' | null>(null);
 
   const filteredListSpecies = useMemo(() => {
     const q = listQuery.trim().toLowerCase();
@@ -165,7 +176,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
         sp.commonName.toLowerCase().includes(q) ||
         sp.scientificName.toLowerCase().includes(q) ||
         sp.catalogCode.toLowerCase().includes(q) ||
-        sp.taxon.toLowerCase().includes(q),
+        sp.taxon.toLowerCase().includes(q) ||
+        (sp.botanicalGroup || '').toLowerCase().includes(q),
     );
   }, [species, listQuery]);
 
@@ -280,6 +292,116 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     setMode(species.length <= 1 ? 'create' : 'view');
   };
 
+  const handleCopySpeciesExport = async (
+    record: SpeciesRecord,
+    format: 'markdown' | 'json',
+  ) => {
+    const content =
+      format === 'markdown'
+        ? formatSpeciesMarkdown(record)
+        : JSON.stringify(record, null, 2);
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMode(format);
+      window.setTimeout(() => setCopiedMode(null), 1800);
+    } catch {
+      // Clipboard API may be unavailable in restricted contexts
+    }
+  };
+
+  const handleDraftTaxonSwitch = (nextTaxon: TaxonGroup) => {
+    setDraft((prev) => {
+      const nextIsPlant = nextTaxon === 'Plantas';
+      const wasPlant = prev.taxon === 'Plantas';
+      if (nextIsPlant === wasPlant) {
+        return { ...prev, taxon: nextTaxon };
+      }
+
+      let nextCode = prev.catalogCode;
+      if (mode === 'create') {
+        if (nextIsPlant && prev.catalogCode.startsWith('CBLS-SP-')) {
+          const floraIndex = getNextCatalogIndex(species, 'CBLS-FL-');
+          nextCode = `CBLS-FL-${String(floraIndex).padStart(3, '0')}`;
+        } else if (!nextIsPlant && prev.catalogCode.startsWith('CBLS-FL-')) {
+          const faunaIndex = getNextCatalogIndex(species, 'CBLS-');
+          nextCode = `CBLS-SP-${String(faunaIndex).padStart(3, '0')}`;
+        }
+      }
+
+      const nextActivity = nextIsPlant
+        ? (FLORA_PHENOLOGY_CYCLES as readonly string[]).includes(prev.activityCycle)
+          ? prev.activityCycle
+          : 'Permanente (Flora)'
+        : (FAUNA_ACTIVITY_CYCLES as readonly string[]).includes(prev.activityCycle)
+          ? prev.activityCycle
+          : 'Diurna';
+
+      const currentNotes = prev.bioacoustics.notes?.trim() || '';
+      const nextNotes = nextIsPlant
+        ? currentNotes === 'No aplica (Sin canto).'
+          ? ''
+          : prev.bioacoustics.notes
+        : currentNotes || 'No aplica (Sin canto).';
+
+      return {
+        ...prev,
+        taxon: nextTaxon,
+        catalogCode: nextCode,
+        activityCycle: nextActivity,
+        bioacoustics: {
+          ...prev.bioacoustics,
+          hasCall: nextIsPlant ? false : prev.bioacoustics.hasCall,
+          notes: nextNotes,
+        },
+      };
+    });
+  };
+
+  const applyFloraExampleTemplate = () => {
+    setDraft((prev) => ({
+      ...prev,
+      taxon: 'Plantas',
+      catalogCode:
+        prev.catalogCode.startsWith('CBLS-SP-') || !prev.catalogCode.trim()
+          ? `CBLS-FL-${String(getNextCatalogIndex(species, 'CBLS-FL-')).padStart(3, '0')}`
+          : prev.catalogCode,
+      scientificName: 'Quercus costaricensis',
+      commonName: 'Roble de altura, encino negro, roble blanco',
+      botanicalGroup: 'Fagaceae (Árbol emergente del dosel)',
+      iucn: 'LC',
+      curationStatus: 'Borrador local',
+      activityCycle: 'Fructificación',
+      medicalAlert: true,
+      initialAbundanceNote: 'Rodales dominantes (especie estructural del bosque montano)',
+      photoTag: 'Corteza / Tallo',
+      photoUrl: prev.photoUrl || '',
+      macroPhotoUrl: prev.macroPhotoUrl || '',
+      bioacoustics: {
+        ...prev.bioacoustics,
+        hasCall: false,
+        notes:
+          'Sustrato terrestre en suelos volcánicos humíferos y ácidos de montaña. Exposición plena en el dosel superior (25–35 m) con alta condensación de neblina.',
+      },
+      ecology: {
+        chromaticsAnatomy:
+          'Árbol robusto de hasta 35 m de altura con tronco grueso y corteza grisácea profundamente fisurada. Hojas simples, alternas, coriáceas, elípticas a obovadas con margen entero o ligeramente ondulado y envés con pubescencia ferrugínea.',
+        ethologyBehavior:
+          'Adaptado a bajas temperaturas nocturnas y alta radiación UV diurna mediante hojas gruesas esclerófilas con cutícula cerosa que reduce la pérdida hídrica y soporta vientos de altura.',
+        courtshipReproduction:
+          'Polinización anemófila (por el viento) mediante amentos colgantes. Produce bellotas ovoides parcialmente cubiertas por una cúpula escamosa; dispersión mediada por gravedad y fauna silvestre.',
+        interIntraRelations:
+          'Especie clave estructural: alberga cientos de especies de epífitas (orquídeas, bromelias, musgos), mantiene simbiosis ectomicorrícica obligada en sus raíces y alimenta fauna como Melanerpes formicivorus.',
+        confirmedReferences:
+          'Endémico de las tierras altas de Costa Rica y el oeste de Panamá (Cordillera Central y de Talamanca). Constituye la matriz forestal principal del Corredor Biológico Los Santos.',
+      },
+    }));
+  };
+
+  const activeSchema = getKingdomSchema(activeSpecies?.taxon);
+  const draftSchema = getKingdomSchema(draft.taxon);
+  const draftPhotoTagOptions = draftSchema.isPlant ? FLORA_PHOTO_TAGS : FAUNA_PHOTO_TAGS;
+  const draftCycleOptions = draftSchema.isPlant ? FLORA_PHENOLOGY_CYCLES : FAUNA_ACTIVITY_CYCLES;
+
   const buildCleanSpeciesRecord = (): SpeciesRecord => ({
     ...draft,
     isSample: true,
@@ -290,6 +412,18 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     holdridgeZone: undefined,
     scientificName: draft.scientificName.trim(),
     commonName: draft.commonName.trim(),
+    botanicalGroup: draft.botanicalGroup?.trim() || undefined,
+    macroPhotoUrl: draft.macroPhotoUrl?.trim() || undefined,
+    initialAbundanceNote: draft.initialAbundanceNote?.trim() || undefined,
+    bioacoustics: {
+      ...draft.bioacoustics,
+      hasCall: draft.taxon === 'Plantas' ? false : draft.bioacoustics.hasCall,
+      notes:
+        draft.bioacoustics.notes.trim() ||
+        (draft.taxon === 'Plantas'
+          ? 'Sin notas de sustrato registradas.'
+          : 'No aplica (Sin canto).'),
+    },
     creatorName: draft.creatorName || currentUser?.observerName || 'Administrador',
   });
 
@@ -446,7 +580,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                           <>
                             <span className="text-muted">·</span>
                             <span className="font-mono text-coral">
-                              {sp.medicalAlert ? 'Ofídico' : sp.iucn}
+                              {sp.medicalAlert
+                                ? sp.taxon === 'Plantas'
+                                  ? 'Veda / Endémica'
+                                  : 'Ofídico'
+                                : sp.iucn}
                             </span>
                           </>
                         ) : null}
@@ -456,6 +594,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       </p>
                       <p className="text-xs italic text-muted">
                         {sp.scientificName}
+                        {sp.botanicalGroup ? ` · ${sp.botanicalGroup}` : ''}
                       </p>
                     </div>
                     <span className="shrink-0 font-mono text-xs text-muted">
@@ -483,7 +622,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   className="h-full w-full"
                 />
                 <div className="absolute bottom-3 left-3 bg-background/90 px-2.5 py-1 font-mono text-xs text-foreground">
-                  Toma: {activeSpecies.photoTag}
+                  {activeSchema.isPlant ? 'Diagnóstico' : 'Toma'}: {activeSpecies.photoTag}
                 </div>
               </div>
 
@@ -496,7 +635,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       </span>
                       {' · '}
                       <span className="font-semibold text-primary">
-                        Especie de muestra
+                        {activeSchema.isPlant ? 'Flora · Muestra' : 'Especie de muestra'}
                       </span>
                       {' · '}
                       <span>{activeSpecies.taxon}</span>
@@ -515,6 +654,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   <p className="text-lg italic text-muted">
                     {activeSpecies.scientificName}
                   </p>
+                  {activeSpecies.botanicalGroup && (
+                    <p className="mt-1 text-xs font-medium text-secondary">
+                      {activeSchema.botanicalGroupLabel}: {activeSpecies.botanicalGroup}
+                    </p>
+                  )}
 
                   <p className="mt-3 text-xs text-foreground/90">
                     <span>UICN: </span>
@@ -528,21 +672,33 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       {activeSpecies.iucn}
                     </span>
                     {' · '}
-                    <span>Actividad: {activeSpecies.activityCycle}</span>
+                    <span>
+                      {activeSchema.isPlant ? 'Fenología' : 'Actividad'}: {activeSpecies.activityCycle}
+                    </span>
                     {activeSpecies.medicalAlert && (
                       <>
                         {' · '}
                         <span className="font-medium text-coral">
-                          ▲ Venenosa / interés médico
+                          {activeSchema.alertDetailLabel}
                         </span>
                       </>
                     )}
                   </p>
+                  {activeSpecies.initialAbundanceNote && (
+                    <p className="mt-1.5 text-xs text-foreground/85">
+                      <span className="text-muted">
+                        {activeSchema.isPlant ? 'Cobertura / individuos:' : 'Abundancia de referencia:'}
+                      </span>{' '}
+                      {activeSpecies.initialAbundanceNote}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2 border-t border-border pt-3 text-xs text-muted">
                   <p className="font-semibold text-primary">
-                    Ficha de referencia (Especie de muestra)
+                    {activeSchema.isPlant
+                      ? 'Ficha botánica de referencia (Flora CBLS)'
+                      : 'Ficha de referencia (Especie de muestra)'}
                   </p>
                   {speciesSightings.length > 0 ? (
                     <>
@@ -602,6 +758,38 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       Editar ficha
                     </Button>
                   )}
+                  <Button
+                    tone="quiet"
+                    onClick={() => void handleCopySpeciesExport(activeSpecies, 'markdown')}
+                  >
+                    {copiedMode === 'markdown' ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 text-primary" />
+                        ¡Copiado MD!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5" />
+                        Copiar Markdown
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    tone="quiet"
+                    onClick={() => void handleCopySpeciesExport(activeSpecies, 'json')}
+                  >
+                    {copiedMode === 'json' ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 text-primary" />
+                        ¡Copiado JSON!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5" />
+                        Copiar JSON
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
             </div>
@@ -719,14 +907,14 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
               </div>
             )}
 
-            {/* Media URLs Section (Photo, Video, Audio) */}
+            {/* Media URLs Section (Photo, Video, Macro/Herbarium or Audio) */}
             <div className="p-5 border-t border-border space-y-3">
               <h3 className="text-sm font-semibold text-foreground">
                 Enlaces Multimedia asociados (URL)
               </h3>
               <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
                 <div className="rounded border border-border p-2">
-                  <span className="text-muted block font-medium">Foto URL:</span>
+                  <span className="text-muted block font-medium">Foto principal URL:</span>
                   {activeSpecies.photoUrl ? (
                     <a
                       href={activeSpecies.photoUrl}
@@ -756,8 +944,23 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   )}
                 </div>
                 <div className="rounded border border-border p-2">
-                  <span className="text-muted block font-medium">Audio / Canto URL:</span>
-                  {activeSpecies.bioacoustics.audioUrl ? (
+                  <span className="text-muted block font-medium">
+                    {activeSchema.isPlant ? 'Foto Macro / Herbario URL:' : 'Audio / Canto URL:'}
+                  </span>
+                  {activeSchema.isPlant ? (
+                    activeSpecies.macroPhotoUrl ? (
+                      <a
+                        href={activeSpecies.macroPhotoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline truncate block"
+                      >
+                        {activeSpecies.macroPhotoUrl}
+                      </a>
+                    ) : (
+                      <span className="text-muted/60 italic">Sin URL</span>
+                    )
+                  ) : activeSpecies.bioacoustics.audioUrl ? (
                     <a
                       href={activeSpecies.bioacoustics.audioUrl}
                       target="_blank"
@@ -771,27 +974,40 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   )}
                 </div>
               </div>
+              {activeSchema.isPlant && activeSpecies.macroPhotoUrl && (
+                <div className="pt-1">
+                  <img
+                    src={activeSpecies.macroPhotoUrl}
+                    alt={`Detalle macro / herbario de ${activeSpecies.commonName}`}
+                    className="max-h-44 rounded-lg border border-border object-cover"
+                  />
+                </div>
+              )}
             </div>
 
-            {/* Bioacoustic Status & Player */}
+            {/* Bioacoustic Status OR Botanical Substrate/Microhabitat */}
             <div className="flex flex-wrap items-center justify-between gap-4 p-5">
               <div className="min-w-0 flex-1 space-y-1">
                 <h3 className="text-base font-semibold text-foreground">
-                  Registro bioacústico de referencia
+                  {activeSchema.substrateOrBioHeader}
                 </h3>
-                <p className="text-xs text-muted">
-                  Estado:{' '}
-                  <span className="font-medium text-foreground">
-                    {activeSpecies.bioacoustics.hasCall || activeSpecies.bioacoustics.audioUrl
-                      ? `Sí aplica (Posee canto / audio)`
-                      : 'No aplica (Sin canto)'}
-                  </span>
-                </p>
+                {!activeSchema.isPlant && (
+                  <p className="text-xs text-muted">
+                    Estado:{' '}
+                    <span className="font-medium text-foreground">
+                      {activeSpecies.bioacoustics.hasCall || activeSpecies.bioacoustics.audioUrl
+                        ? `Sí aplica (Posee canto / audio)`
+                        : 'No aplica (Sin canto)'}
+                    </span>
+                  </p>
+                )}
                 <p className="pt-1 text-sm leading-relaxed text-foreground/90">
-                  {activeSpecies.bioacoustics.notes}
+                  {activeSpecies.bioacoustics.notes || 'Sin notas registradas.'}
                 </p>
               </div>
-              {activeSpecies.bioacoustics.hasCall || activeSpecies.bioacoustics.audioUrl ? (
+              {(!activeSchema.isPlant &&
+                (activeSpecies.bioacoustics.hasCall || activeSpecies.bioacoustics.audioUrl)) ||
+              (activeSchema.isPlant && activeSpecies.bioacoustics.audioUrl) ? (
                 <Button
                   tone={isPlayingCall ? 'coral' : 'secondary'}
                   onClick={() => handlePlayCall(activeSpecies)}
@@ -815,7 +1031,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
             <div className="divide-y divide-border">
               <div className="p-5">
                 <h3 className="text-base font-semibold text-foreground">
-                  Cromática y anatomía del espécimen
+                  {activeSchema.eco1Label}
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
                   {activeSpecies.ecology.chromaticsAnatomy || 'Sin datos registrados.'}
@@ -824,7 +1040,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
               <div className="p-5">
                 <h3 className="text-base font-semibold text-foreground">
-                  Etología y comportamiento en sitio
+                  {activeSchema.eco2Label}
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
                   {activeSpecies.ecology.ethologyBehavior || 'Sin datos registrados.'}
@@ -833,7 +1049,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
               <div className="p-5">
                 <h3 className="text-base font-semibold text-foreground">
-                  Cortejo, reproducción y cuidado parental
+                  {activeSchema.eco3Label}
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
                   {activeSpecies.ecology.courtshipReproduction ||
@@ -843,7 +1059,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
               <div className="p-5">
                 <h3 className="text-base font-semibold text-foreground">
-                  Relaciones intra e interespecíficas
+                  {activeSchema.eco4Label}
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
                   {activeSpecies.ecology.interIntraRelations ||
@@ -853,7 +1069,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
               <div className="p-5">
                 <h3 className="text-base font-semibold text-foreground">
-                  Datos científicos confirmados y literatura regional
+                  {activeSchema.eco5Label}
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-muted">
                   {activeSpecies.ecology.confirmedReferences ||
@@ -930,6 +1146,88 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="divide-y divide-border">
+              {/* Block 0: Kingdom Selector (Fauna Animalia vs Flora Plantae) */}
+              <div className="space-y-3 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold uppercase tracking-wider text-primary">
+                      1. Reino biológico (adapta los campos automáticamente)
+                    </h3>
+                    <p className="text-xs text-muted">
+                      Cambia entre Fauna (Animalia) y Flora (Plantae) para ajustar fenología, sustrato y campos botánicos.
+                    </p>
+                  </div>
+                  {mode === 'create' && draftSchema.isPlant && (
+                    <Button tone="quiet" onClick={applyFloraExampleTemplate} className="min-h-8 text-xs">
+                      <Leaf className="h-3.5 w-3.5 text-primary" />
+                      Cargar ejemplo Flora (Quercus)
+                    </Button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleDraftTaxonSwitch(
+                        draft.taxon === 'Plantas' ? 'Aves' : draft.taxon,
+                      )
+                    }
+                    className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      !draftSchema.isPlant
+                        ? 'border-primary bg-primary/15 text-foreground'
+                        : 'border-border bg-input text-muted hover:border-foreground/30 hover:text-foreground'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
+                        !draftSchema.isPlant
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted'
+                      }`}
+                    >
+                      <PawPrint className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <span className="block text-sm font-semibold text-foreground">
+                        Fauna (Animalia)
+                      </span>
+                      <span className="block font-mono text-[11px] text-muted">
+                        Prefijo CBLS-SP-XXX · Bioacústica y etología
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDraftTaxonSwitch('Plantas')}
+                    className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      draftSchema.isPlant
+                        ? 'border-primary bg-primary/15 text-foreground'
+                        : 'border-border bg-input text-muted hover:border-foreground/30 hover:text-foreground'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
+                        draftSchema.isPlant
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted'
+                      }`}
+                    >
+                      <Leaf className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <span className="block text-sm font-semibold text-foreground">
+                        Flora (Plantae)
+                      </span>
+                      <span className="block font-mono text-[11px] text-muted">
+                        Prefijo CBLS-FL-XXX · Fenología, sustrato y simbiosis
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
               {/* Block 1: Taxonomy & Basic Metadata */}
               <div className="space-y-4 p-5">
                 <h3 className="text-base font-semibold text-foreground">
@@ -945,7 +1243,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       id="sp-sci"
                       type="text"
                       required
-                      placeholder="Ej. Pharomachrus mocinno"
+                      placeholder={
+                        draftSchema.isPlant
+                          ? 'Ej. Quercus costaricensis'
+                          : 'Ej. Pharomachrus mocinno'
+                      }
                       value={draft.scientificName}
                       onChange={(e) =>
                         setDraft((p) => ({ ...p, scientificName: e.target.value }))
@@ -962,7 +1264,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       id="sp-common"
                       type="text"
                       required
-                      placeholder="Ej. Quetzal centroamericano"
+                      placeholder={
+                        draftSchema.isPlant
+                          ? 'Ej. Roble de altura, encino negro'
+                          : 'Ej. Quetzal centroamericano'
+                      }
                       value={draft.commonName}
                       onChange={(e) =>
                         setDraft((p) => ({ ...p, commonName: e.target.value }))
@@ -971,24 +1277,38 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     />
                   </Field>
 
-                  <Field label="Grupo taxonómico" htmlFor="sp-taxon">
+                  <Field label={draftSchema.taxonGroupLabel} htmlFor="sp-taxon">
                     <select
                       id="sp-taxon"
                       value={draft.taxon}
                       onChange={(e) =>
-                        setDraft((p) => ({
-                          ...p,
-                          taxon: e.target.value as TaxonGroup,
-                        }))
+                        handleDraftTaxonSwitch(e.target.value as TaxonGroup)
                       }
                       className={inputClassName}
                     >
                       {TAXON_GROUPS.map((t) => (
                         <option key={t} value={t}>
-                          {t}
+                          {t === 'Plantas' ? 'Plantas (Flora / Plantae)' : t}
                         </option>
                       ))}
                     </select>
+                  </Field>
+
+                  <Field
+                    label={draftSchema.botanicalGroupLabel}
+                    hint={draftSchema.isPlant ? 'Familia y hábito' : 'Opcional'}
+                    htmlFor="sp-bot-group"
+                  >
+                    <input
+                      id="sp-bot-group"
+                      type="text"
+                      placeholder={draftSchema.botanicalGroupPlaceholder}
+                      value={draft.botanicalGroup || ''}
+                      onChange={(e) =>
+                        setDraft((p) => ({ ...p, botanicalGroup: e.target.value }))
+                      }
+                      className={inputClassName}
+                    />
                   </Field>
 
                   <Field label="Código de catálogo CBLS" htmlFor="sp-code">
@@ -1042,7 +1362,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     </select>
                   </Field>
 
-                  <Field label="Horario de actividad" htmlFor="sp-cycle">
+                  <Field label={draftSchema.activityLabel} htmlFor="sp-cycle">
                     <select
                       id="sp-cycle"
                       value={draft.activityCycle}
@@ -1055,15 +1375,15 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       }
                       className={inputClassName}
                     >
-                      <option value="Diurna">Diurna</option>
-                      <option value="Nocturna">Nocturna</option>
-                      <option value="Crepuscular">Crepuscular</option>
-                      <option value="Diurno/nocturno">Diurno/nocturno</option>
-                      <option value="Permanente (Flora)">Permanente (Flora)</option>
+                      {draftCycleOptions.map((cycle) => (
+                        <option key={cycle} value={cycle}>
+                          {cycle}
+                        </option>
+                      ))}
                     </select>
                   </Field>
 
-                  <div className="flex items-end">
+                  <div className="flex items-end sm:col-span-2">
                     <label className="flex min-h-12 w-full cursor-pointer items-center gap-3 rounded-control border border-border bg-input px-3.5 py-2.5 text-sm text-foreground">
                       <input
                         type="checkbox"
@@ -1076,42 +1396,51 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                         }
                         className="h-5 w-5 accent-primary"
                       />
-                      <span>Alerta ofídica / veneno / prioritario</span>
+                      <span>{draftSchema.alertCheckboxLabel}</span>
                     </label>
                   </div>
                 </div>
               </div>
 
-              {/* Block 2: Multimedia por URL (Fotos, Videos, Audios) */}
+              {/* Block 2: Multimedia por URL & Diagnóstico */}
               <div className="space-y-4 p-5">
                 <h3 className="text-base font-semibold text-foreground">
-                  Multimedia por Enlace URL (Imágenes, Videos, Audios)
+                  {draftSchema.isPlant
+                    ? 'Multimedia y Registros Diagnósticos Botánicos'
+                    : 'Multimedia por Enlace URL (Imágenes, Videos, Audios)'}
                 </h3>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Field
-                    label="URL de Fotografía Principal"
-                    hint="Pega enlace https://..."
-                    htmlFor="sp-photo-url"
+                    label={draftSchema.abundanceLabel}
+                    hint={draftSchema.isPlant ? 'Opcional' : 'Opcional'}
+                    htmlFor="sp-abundance"
                   >
                     <input
-                      id="sp-photo-url"
-                      type="url"
-                      placeholder="https://ejemplo.com/quetzal.jpg"
-                      value={draft.photoUrl}
+                      id="sp-abundance"
+                      type="text"
+                      placeholder={draftSchema.abundancePlaceholder}
+                      value={draft.initialAbundanceNote || ''}
                       onChange={(e) =>
-                        setDraft((p) => ({ ...p, photoUrl: e.target.value }))
+                        setDraft((p) => ({
+                          ...p,
+                          initialAbundanceNote: e.target.value,
+                        }))
                       }
                       className={inputClassName}
                     />
                   </Field>
 
                   <Field
-                    label="Etiqueta anatómica de la foto"
+                    label={draftSchema.photoTagLabel}
                     htmlFor="sp-photo-tag"
                   >
                     <select
                       id="sp-photo-tag"
-                      value={draft.photoTag}
+                      value={
+                        (draftPhotoTagOptions as readonly string[]).includes(draft.photoTag)
+                          ? draft.photoTag
+                          : 'Vista general'
+                      }
                       onChange={(e) =>
                         setDraft((p) => ({
                           ...p,
@@ -1120,7 +1449,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       }
                       className={inputClassName}
                     >
-                      {PHOTO_TAGS.map((tag) => (
+                      {draftPhotoTagOptions.map((tag) => (
                         <option key={tag} value={tag}>
                           {tag}
                         </option>
@@ -1129,14 +1458,78 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   </Field>
 
                   <Field
+                    label="URL de Fotografía Principal"
+                    hint="Pega enlace https://..."
+                    htmlFor="sp-photo-url"
+                  >
+                    <input
+                      id="sp-photo-url"
+                      type="url"
+                      placeholder={
+                        draftSchema.isPlant
+                          ? 'https://ejemplo.com/quercus_costaricensis.jpg'
+                          : 'https://ejemplo.com/quetzal.jpg'
+                      }
+                      value={draft.photoUrl}
+                      onChange={(e) =>
+                        setDraft((p) => ({ ...p, photoUrl: e.target.value }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+
+                  {draftSchema.isPlant ? (
+                    <Field
+                      label={draftSchema.macroOrExtraUrlLabel}
+                      hint={draftSchema.macroOrExtraUrlHint}
+                      htmlFor="sp-macro-url"
+                    >
+                      <input
+                        id="sp-macro-url"
+                        type="url"
+                        placeholder={draftSchema.macroOrExtraUrlPlaceholder}
+                        value={draft.macroPhotoUrl || ''}
+                        onChange={(e) =>
+                          setDraft((p) => ({
+                            ...p,
+                            macroPhotoUrl: e.target.value,
+                          }))
+                        }
+                        className={inputClassName}
+                      />
+                    </Field>
+                  ) : (
+                    <Field
+                      label={draftSchema.macroOrExtraUrlLabel}
+                      hint={draftSchema.macroOrExtraUrlHint}
+                      htmlFor="sp-audio-url"
+                    >
+                      <input
+                        id="sp-audio-url"
+                        type="url"
+                        placeholder={draftSchema.macroOrExtraUrlPlaceholder}
+                        value={draft.bioacoustics.audioUrl || ''}
+                        onChange={(e) =>
+                          setDraft((p) => ({
+                            ...p,
+                            bioacoustics: { ...p.bioacoustics, audioUrl: e.target.value },
+                          }))
+                        }
+                        className={inputClassName}
+                      />
+                    </Field>
+                  )}
+
+                  <Field
                     label="URL de Video (opcional)"
                     hint="YouTube, Vimeo o video directo"
                     htmlFor="sp-video-url"
+                    className="sm:col-span-2"
                   >
                     <input
                       id="sp-video-url"
                       type="url"
-                      placeholder="https://ejemplo.com/comportamiento.mp4"
+                      placeholder="https://ejemplo.com/registro_campo.mp4"
                       value={draft.videoUrl || ''}
                       onChange={(e) =>
                         setDraft((p) => ({ ...p, videoUrl: e.target.value }))
@@ -1144,146 +1537,161 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       className={inputClassName}
                     />
                   </Field>
-
-                  <Field
-                    label="URL de Canto / Audio (opcional)"
-                    hint="MP3, WAV o enlace sonoro"
-                    htmlFor="sp-audio-url"
-                  >
-                    <input
-                      id="sp-audio-url"
-                      type="url"
-                      placeholder="https://ejemplo.com/canto_macho.mp3"
-                      value={draft.bioacoustics.audioUrl || ''}
-                      onChange={(e) =>
-                        setDraft((p) => ({
-                          ...p,
-                          bioacoustics: { ...p.bioacoustics, audioUrl: e.target.value },
-                        }))
-                      }
-                      className={inputClassName}
-                    />
-                  </Field>
                 </div>
               </div>
 
-              {/* Block 3: Bioacoustics */}
+              {/* Block 3: Bioacoustics (Fauna) OR Substrate & Microhabitat (Flora) */}
               <div className="space-y-4 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-base font-semibold text-foreground">
-                      Registro bioacústico
-                    </h3>
-                    <p className="text-xs text-muted">
-                      Define si el taxón posee canto o estridulación
-                    </p>
-                  </div>
+                {draftSchema.isPlant ? (
+                  <>
+                    <div>
+                      <h3 className="text-base font-semibold text-foreground">
+                        {draftSchema.substrateOrBioHeader}
+                      </h3>
+                      <p className="text-xs text-muted">
+                        Documenta sustrato (terrestre, epífito, litófito), forófito hospedero, humedad y exposición solar.
+                      </p>
+                    </div>
 
-                  <div role="group" aria-label="Estado bioacústico" className="flex flex-wrap gap-2">
-                    <Button
-                      tone={!draft.bioacoustics.hasCall ? 'primary' : 'quiet'}
-                      onClick={() =>
-                        setDraft((p) => ({
-                          ...p,
-                          bioacoustics: {
-                            ...p.bioacoustics,
-                            hasCall: false,
-                            notes: p.bioacoustics.notes || 'No aplica (Sin canto).',
-                          },
-                        }))
-                      }
-                    >
-                      No aplica (Sin canto)
-                    </Button>
-                    <Button
-                      tone={draft.bioacoustics.hasCall ? 'primary' : 'quiet'}
-                      onClick={() =>
-                        setDraft((p) => ({
-                          ...p,
-                          bioacoustics: {
-                            ...p.bioacoustics,
-                            hasCall: true,
-                            dominantFreqKhz: p.bioacoustics.dominantFreqKhz ?? 2.4,
-                            pulsePattern: p.bioacoustics.pulsePattern ?? 'pulse',
-                          },
-                        }))
-                      }
-                    >
-                      Sí aplica (Posee canto)
-                    </Button>
-                  </div>
-                </div>
-
-                {draft.bioacoustics.hasCall && (
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <Field
-                      label="Frecuencia dominante (kHz)"
-                      htmlFor="sp-freq"
+                      label={draftSchema.substrateOrBioNotesLabel}
+                      htmlFor="sp-bio-notes"
                     >
-                      <StepperInput
-                        id="sp-freq"
-                        value={draft.bioacoustics.dominantFreqKhz ?? 2.4}
-                        min={0.4}
-                        max={9.5}
-                        step={0.1}
-                        unit="kHz"
-                        onChange={(val) =>
-                          setDraft((p) => ({
-                            ...p,
-                            bioacoustics: {
-                              ...p.bioacoustics,
-                              dominantFreqKhz: val,
-                            },
-                          }))
-                        }
-                      />
-                    </Field>
-
-                    <Field label="Patrón espectral sintético" htmlFor="sp-pattern">
-                      <select
-                        id="sp-pattern"
-                        value={draft.bioacoustics.pulsePattern ?? 'pulse'}
+                      <textarea
+                        id="sp-bio-notes"
+                        rows={3}
+                        placeholder={draftSchema.substrateOrBioPlaceholder}
+                        value={draft.bioacoustics.notes}
                         onChange={(e) =>
                           setDraft((p) => ({
                             ...p,
-                            bioacoustics: {
-                              ...p.bioacoustics,
-                              pulsePattern: e.target.value as
-                                | 'flute'
-                                | 'pulse'
-                                | 'whistle'
-                                | 'chirp',
-                            },
+                            bioacoustics: { ...p.bioacoustics, notes: e.target.value },
                           }))
                         }
-                        className={inputClassName}
-                      >
-                        <option value="flute">Silbido aflautado (Aves)</option>
-                        <option value="pulse">Pulsos repetitivos (Anfibios)</option>
-                        <option value="chirp">Chirridos metálicos (Insectos/Aves)</option>
-                        <option value="whistle">Silbido descendente (Mamíferos)</option>
-                      </select>
+                        className={textareaClassName}
+                      />
                     </Field>
-                  </div>
-                )}
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-base font-semibold text-foreground">
+                          Registro bioacústico
+                        </h3>
+                        <p className="text-xs text-muted">
+                          Define si el taxón posee canto o estridulación
+                        </p>
+                      </div>
 
-                <Field
-                  label="Notas de bioacústica y contexto de emisión"
-                  htmlFor="sp-bio-notes"
-                >
-                  <textarea
-                    id="sp-bio-notes"
-                    rows={2}
-                    value={draft.bioacoustics.notes}
-                    onChange={(e) =>
-                      setDraft((p) => ({
-                        ...p,
-                        bioacoustics: { ...p.bioacoustics, notes: e.target.value },
-                      }))
-                    }
-                    className={textareaClassName}
-                  />
-                </Field>
+                      <div role="group" aria-label="Estado bioacústico" className="flex flex-wrap gap-2">
+                        <Button
+                          tone={!draft.bioacoustics.hasCall ? 'primary' : 'quiet'}
+                          onClick={() =>
+                            setDraft((p) => ({
+                              ...p,
+                              bioacoustics: {
+                                ...p.bioacoustics,
+                                hasCall: false,
+                                notes: p.bioacoustics.notes || 'No aplica (Sin canto).',
+                              },
+                            }))
+                          }
+                        >
+                          No aplica (Sin canto)
+                        </Button>
+                        <Button
+                          tone={draft.bioacoustics.hasCall ? 'primary' : 'quiet'}
+                          onClick={() =>
+                            setDraft((p) => ({
+                              ...p,
+                              bioacoustics: {
+                                ...p.bioacoustics,
+                                hasCall: true,
+                                dominantFreqKhz: p.bioacoustics.dominantFreqKhz ?? 2.4,
+                                pulsePattern: p.bioacoustics.pulsePattern ?? 'pulse',
+                              },
+                            }))
+                          }
+                        >
+                          Sí aplica (Posee canto)
+                        </Button>
+                      </div>
+                    </div>
+
+                    {draft.bioacoustics.hasCall && (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <Field
+                          label="Frecuencia dominante (kHz)"
+                          htmlFor="sp-freq"
+                        >
+                          <StepperInput
+                            id="sp-freq"
+                            value={draft.bioacoustics.dominantFreqKhz ?? 2.4}
+                            min={0.4}
+                            max={9.5}
+                            step={0.1}
+                            unit="kHz"
+                            onChange={(val) =>
+                              setDraft((p) => ({
+                                ...p,
+                                bioacoustics: {
+                                  ...p.bioacoustics,
+                                  dominantFreqKhz: val,
+                                },
+                              }))
+                            }
+                          />
+                        </Field>
+
+                        <Field label="Patrón espectral sintético" htmlFor="sp-pattern">
+                          <select
+                            id="sp-pattern"
+                            value={draft.bioacoustics.pulsePattern ?? 'pulse'}
+                            onChange={(e) =>
+                              setDraft((p) => ({
+                                ...p,
+                                bioacoustics: {
+                                  ...p.bioacoustics,
+                                  pulsePattern: e.target.value as
+                                    | 'flute'
+                                    | 'pulse'
+                                    | 'whistle'
+                                    | 'chirp',
+                                },
+                              }))
+                            }
+                            className={inputClassName}
+                          >
+                            <option value="flute">Silbido aflautado (Aves)</option>
+                            <option value="pulse">Pulsos repetitivos (Anfibios)</option>
+                            <option value="chirp">Chirridos metálicos (Insectos/Aves)</option>
+                            <option value="whistle">Silbido descendente (Mamíferos)</option>
+                          </select>
+                        </Field>
+                      </div>
+                    )}
+
+                    <Field
+                      label={draftSchema.substrateOrBioNotesLabel}
+                      htmlFor="sp-bio-notes"
+                    >
+                      <textarea
+                        id="sp-bio-notes"
+                        rows={2}
+                        placeholder={draftSchema.substrateOrBioPlaceholder}
+                        value={draft.bioacoustics.notes}
+                        onChange={(e) =>
+                          setDraft((p) => ({
+                            ...p,
+                            bioacoustics: { ...p.bioacoustics, notes: e.target.value },
+                          }))
+                        }
+                        className={textareaClassName}
+                      />
+                    </Field>
+                  </>
+                )}
               </div>
 
               {/* Block 4: Sample-Only Notice (No initial location stored on species) */}
@@ -1306,12 +1714,12 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
               {/* Block 5: Ecological & Diagnostic Research Fields */}
               <div className="space-y-4 p-5">
                 <h3 className="text-base font-semibold text-foreground">
-                  Campos de investigación biológica y ecología
+                  {draftSchema.ecologySectionTitle}
                 </h3>
 
                 <Field
-                  label="Cromática y anatomía del espécimen"
-                  hint="Morfología diagnóstica, patrones de color, escamación, plumaje o follaje"
+                  label={draftSchema.eco1Label}
+                  hint={draftSchema.eco1Hint}
                   htmlFor="eco-chrom"
                 >
                   <textarea
@@ -1332,8 +1740,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 </Field>
 
                 <Field
-                  label="Etología y comportamiento en sitio"
-                  hint="Termorregulación, estrato vertical, forrajeo y desplazamiento"
+                  label={draftSchema.eco2Label}
+                  hint={draftSchema.eco2Hint}
                   htmlFor="eco-etho"
                 >
                   <textarea
@@ -1354,7 +1762,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 </Field>
 
                 <Field
-                  label="Cortejo, reproducción y cuidado parental"
+                  label={draftSchema.eco3Label}
+                  hint={draftSchema.eco3Hint}
                   htmlFor="eco-repro"
                 >
                   <textarea
@@ -1375,7 +1784,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 </Field>
 
                 <Field
-                  label="Relaciones intra e interespecíficas"
+                  label={draftSchema.eco4Label}
+                  hint={draftSchema.eco4Hint}
                   htmlFor="eco-rel"
                 >
                   <textarea
@@ -1396,7 +1806,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 </Field>
 
                 <Field
-                  label="Datos científicos confirmados"
+                  label={draftSchema.eco5Label}
                   htmlFor="eco-ref"
                 >
                   <textarea

@@ -90,6 +90,7 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
       return (
         sp.scientificName.toLowerCase().includes(normalized) ||
         sp.commonName.toLowerCase().includes(normalized) ||
+        (sp.botanicalGroup || '').toLowerCase().includes(normalized) ||
         (sp.locality || '').toLowerCase().includes(normalized) ||
         sp.catalogCode.toLowerCase().includes(normalized) ||
         zoneName.includes(normalized)
@@ -205,7 +206,7 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
             <input
               id="collection-search"
               type="search"
-              placeholder="Buscar por nombre científico, común, localidad o código..."
+              placeholder="Buscar por nombre científico, común, familia botánica o código..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className={`${inputClassName} pl-10 pr-10`}
@@ -283,7 +284,7 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                       className="h-full w-full"
                     />
                     <span className="absolute left-2.5 top-2.5 rounded-full border border-primary/35 bg-[#04110B]/90 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-primary">
-                      Muestra · Fijada
+                      {sp.taxon === 'Plantas' ? 'Flora · Fijada' : 'Muestra · Fijada'}
                     </span>
                   </div>
 
@@ -310,7 +311,9 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                             : 'font-mono text-muted'
                         }
                       >
-                        UICN {sp.iucn}
+                        {sp.medicalAlert && sp.taxon === 'Plantas'
+                          ? `UICN ${sp.iucn} · Veda/End.`
+                          : `UICN ${sp.iucn}`}
                       </span>
                     </p>
 
@@ -321,6 +324,11 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                       <p className="text-sm italic text-muted">
                         {sp.scientificName}
                       </p>
+                      {sp.botanicalGroup && (
+                        <p className="mt-0.5 text-[11px] font-medium text-secondary">
+                          {sp.botanicalGroup}
+                        </p>
+                      )}
                     </div>
 
                     <p className="line-clamp-2 text-xs leading-relaxed text-foreground/85">

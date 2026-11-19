@@ -25,7 +25,11 @@ export type PhotoTag =
   | 'Puesta'
   | 'Hembra'
   | 'Macho'
-  | 'Floración / Fruto';
+  | 'Floración / Fruto'
+  | 'Hoja / Follaje'
+  | 'Corteza / Tallo'
+  | 'Detalle floral'
+  | 'Cápsula / Esporofito';
 
 export interface HoldridgeZoneInfo {
   id: HoldridgeZoneId;
@@ -54,31 +58,41 @@ export interface EcologyFields {
   confirmedReferences: string;
 }
 
+export type ActivityCycleOption =
+  | 'Diurna'
+  | 'Nocturna'
+  | 'Crepuscular'
+  | 'Diurno/nocturno'
+  | 'Permanente (Flora)'
+  | 'Floración'
+  | 'Fructificación'
+  | 'Vegetativa'
+  | 'Con esporofitos'
+  | 'Floración y brotes';
+
 export interface SpeciesRecord {
   id: string;
   catalogCode: string;
   scientificName: string;
   commonName: string;
   taxon: TaxonGroup;
+  botanicalGroup?: string;
   iucn: IucnCategory;
   medicalAlert: boolean;
   curationStatus: CurationStatus;
   isSample?: boolean;
   photoUrl: string; // URL based
   videoUrl?: string; // URL for video
+  macroPhotoUrl?: string; // URL for macro / herbarium specimen photo
   photoTag: PhotoTag;
+  initialAbundanceNote?: string;
   bioacoustics: BioacousticData;
   latitude?: number;
   longitude?: number;
   elevationM?: number;
   locality?: string;
   holdridgeZone?: HoldridgeZoneId;
-  activityCycle:
-    | 'Diurna'
-    | 'Nocturna'
-    | 'Crepuscular'
-    | 'Diurno/nocturno'
-    | 'Permanente (Flora)';
+  activityCycle: ActivityCycleOption;
   ecology: EcologyFields;
   featuredNote?: string;
   updatedAt: string;

@@ -138,6 +138,12 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
 
+  const selectedSpecies = useMemo(
+    () => speciesList.find((sp) => sp.id === speciesId) ?? null,
+    [speciesList, speciesId],
+  );
+  const isPlantSelected = selectedSpecies?.taxon === 'Plantas';
+
   const sortedFilteredSpecies = useMemo(() => {
     const q = speciesSearch.trim().toLowerCase();
     const sorted = [...speciesList].sort((a, b) =>
@@ -561,7 +567,15 @@ export const SightingModal: React.FC<SightingModalProps> = ({
               )}
             </div>
 
-            <Field label="Individuos contabilizados" hint="Conteo directo" htmlFor="obs-count">
+            <Field
+              label={
+                isPlantSelected
+                  ? 'Individuos o parches contabilizados'
+                  : 'Individuos contabilizados'
+              }
+              hint={isPlantSelected ? 'Ejemplares / cobertura' : 'Conteo directo'}
+              htmlFor="obs-count"
+            >
               <StepperInput
                 id="obs-count"
                 value={individualCount}
@@ -946,10 +960,23 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                 />
               </Field>
 
-              <Field label="Microhábitat y sustrato" htmlFor="obs-microhabitat" className="sm:col-span-2">
+              <Field
+                label={
+                  isPlantSelected
+                    ? 'Sustrato, forófito y exposición lumínica'
+                    : 'Microhábitat y sustrato'
+                }
+                htmlFor="obs-microhabitat"
+                className="sm:col-span-2"
+              >
                 <input
                   id="obs-microhabitat"
                   type="text"
+                  placeholder={
+                    isPlantSelected
+                      ? 'Ej. Epífito sobre tronco de roble, suelo humífero o talud húmedo'
+                      : 'Ej. Sotobosque húmedo sobre vegetación epífita'
+                  }
                   value={microhabitat}
                   onChange={(e) => setMicrohabitat(e.target.value)}
                   className={inputClassName}
@@ -958,14 +985,22 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
               <Field
                 label="Notas y observaciones de campo"
-                hint="Comportamiento, huellas, clima, vocalización u otros detalles"
+                hint={
+                  isPlantSelected
+                    ? 'Fenología (floración, frutos, esporofitos), polinizadores o estado del sustrato'
+                    : 'Comportamiento, huellas, clima, vocalización u otros detalles'
+                }
                 htmlFor="obs-notes"
                 className="sm:col-span-2"
               >
                 <textarea
                   id="obs-notes"
                   rows={3}
-                  placeholder="Ej. Individuo adulto desplazándose por sendero húmedo a las 06:15, huellas frescas hacia quebrada..."
+                  placeholder={
+                    isPlantSelected
+                      ? 'Ej. Individuo adulto con botones florales y frutos verdes, presencia de musgo y epífitas asociadas...'
+                      : 'Ej. Individuo adulto desplazándose por sendero húmedo a las 06:15, huellas frescas hacia quebrada...'
+                  }
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className={textareaClassName}

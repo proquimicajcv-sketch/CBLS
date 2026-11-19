@@ -51,13 +51,25 @@ function sanitizeSpeciesRecord(raw: SpeciesRecord, nowIso: string): SpeciesRecor
     scientificName: String(raw.scientificName || '').trim(),
     commonName: String(raw.commonName || '').trim(),
     taxon: raw.taxon,
+    botanicalGroup:
+      typeof raw.botanicalGroup === 'string' && raw.botanicalGroup.trim()
+        ? raw.botanicalGroup.trim()
+        : undefined,
     iucn: raw.iucn,
     medicalAlert: Boolean(raw.medicalAlert),
     curationStatus: raw.curationStatus || 'Borrador local',
     isSample: true,
     photoUrl: typeof raw.photoUrl === 'string' ? raw.photoUrl.trim() : '',
     videoUrl: typeof raw.videoUrl === 'string' ? raw.videoUrl.trim() : '',
+    macroPhotoUrl:
+      typeof raw.macroPhotoUrl === 'string' && raw.macroPhotoUrl.trim()
+        ? raw.macroPhotoUrl.trim()
+        : undefined,
     photoTag: raw.photoTag || 'Vista general',
+    initialAbundanceNote:
+      typeof raw.initialAbundanceNote === 'string' && raw.initialAbundanceNote.trim()
+        ? raw.initialAbundanceNote.trim()
+        : undefined,
     bioacoustics: {
       hasCall: Boolean(raw.bioacoustics?.hasCall),
       audioUrl:
@@ -71,7 +83,7 @@ function sanitizeSpeciesRecord(raw: SpeciesRecord, nowIso: string): SpeciesRecor
           ? raw.bioacoustics.notes
           : 'No aplica (Sin canto).',
     },
-    activityCycle: raw.activityCycle || 'Diurna',
+    activityCycle: raw.activityCycle || (raw.taxon === 'Plantas' ? 'Permanente (Flora)' : 'Diurna'),
     ecology: {
       chromaticsAnatomy: String(raw.ecology?.chromaticsAnatomy || ''),
       ethologyBehavior: String(raw.ecology?.ethologyBehavior || ''),

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bitácora CBLS — Curaduría de Biodiversidad (Fauna y Flora)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
+
+  <!-- Header -->
+  <header class="bg-emerald-950/80 border-b border-emerald-800/60 sticky top-0 z-20 backdrop-blur">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div>
+        <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400">Corredor Biológico Los Santos · Costa Rica</span>
+        <h1 class="text-xl sm:text-2xl font-bold text-white">Bitácora Científica CBLS (Fauna & Flora)</h1>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button id="btnCargarEjemplo" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
+          Cargar Ejemplo
+        </button>
+        <button id="btnLimpiar" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
+          Limpiar Formulario
+        </button>
+        <button id="btnExportarJSON" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 transition">
+          Descargar JSON
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Columna Izquierda: Formulario Dinámico -->
+    <section class="lg:col-span-7 space-y-6">
+      <form id="fichaForm" class="space-y-6">
+
+        <!-- Selector de Reino -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <label class="block text-xs font-semibold uppercase tracking-wider text-emerald-400 mb-3">
+            1. Selección de Reino Biológico (Adapta el esquema automáticamente)
+          </label>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="cursor-pointer">
+              <input type="radio" name="reino" value="Animalia" class="peer sr-only" checked />
+              <div class="p-3 rounded-lg border border-slate-700 bg-slate-950 peer-checked:border-emerald-500 peer-checked:bg-emerald-950/40 text-center transition">
+                <div class="font-bold text-sm">🐾 Fauna (Animalia)</div>
+                <div class="text-xs text-slate-400">Prefijo CBLS-SP-XXX</div>
+              </div>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="reino" value="Plantae" class="peer sr-only" />
+              <div class="p-3 rounded-lg border border-slate-700 bg-slate-950 peer-checked:border-emerald-500 peer-checked:bg-emerald-950/40 text-center transition">
+                <div class="font-bold text-sm">🌿 Flora (Plantae)</div>
+                <div class="text-xs text-slate-400">Prefijo CBLS-FL-XXX</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Bloque 1: Taxonomía y Curaduría -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-2">
+            Taxonomía y Datos Básicos de Curaduría
+          </h2>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Nombre científico (binomio) *</label>
+              <input type="text" id="nombre_cientifico" required placeholder="Ej. Quercus costaricensis"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm italic focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Nombre común / vernáculo *</label>
+              <input type="text" id="nombre_comun" required placeholder="Ej. Roble de altura, encino"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label id="lbl_grupo_taxonomico" class="block text-xs text-slate-400 mb-1">Grupo taxonómico</label>
+              <input type="text" id="grupo_taxonomico" placeholder="Ej. Aves (Passeriformes)"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Código de catálogo CBLS</label>
+              <input type="text" id="codigo_catalogo" value="CBLS-SP-034"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Categoría Lista Roja UICN / Estatus</label>
+              <select id="categoria_uicn" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none">
+                <option value="LC — Preocupación menor">LC — Preocupación menor</option>
+                <option value="NT — Casi amenazado">NT — Casi amenazado</option>
+                <option value="VU — Vulnerable">VU — Vulnerable</option>
+                <option value="EN — En peligro">EN — En peligro</option>
+                <option value="CR — En peligro crítico">CR — En peligro crítico</option>
+                <option value="NE — No evaluado / Endémico local">NE — No evaluado / Endémico local</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Estado de curaduría</label>
+              <select id="estado_curaduria" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none">
+                <option value="Borrador local">Borrador local</option>
+                <option value="Validado en campo">Validado en campo</option>
+                <option value="Publicado en Bitácora">Publicado en Bitácora</option>
+              </select>
+            </div>
+            <div>
+              <label id="lbl_actividad_fenologia" class="block text-xs text-slate-400 mb-1">Horario de actividad</label>
+              <input type="text" id="actividad_fenologia" placeholder="Ej. Diurna / Nocturna"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div class="flex items-center pt-5">
+              <label class="flex items-center gap-2 cursor-pointer text-sm">
+                <input type="checkbox" id="alerta_prioritaria" class="w-4 h-4 accent-emerald-500 rounded" />
+                <span id="lbl_alerta_prioritaria" class="text-slate-300">Alerta ofídica / veneno / prioritario</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bloque 2: Multimedia y Registros -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-2">
+            Multimedia y Registros Diagnósticos
+          </h2>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label id="lbl_individuos" class="block text-xs text-slate-400 mb-1">Individuos observados en hallazgo inicial</label>
+              <input type="text" id="individuos_observados" placeholder="Ej. 1 ind. / Parche de 2 m²"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label id="lbl_etiqueta_foto" class="block text-xs text-slate-400 mb-1">Etiqueta anatómica de la foto</label>
+              <input type="text" id="etiqueta_foto" placeholder="Ej. Vista dorsal / Detalle floral"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">URL de Fotografía Principal</label>
+              <input type="url" id="url_foto" placeholder="https://..."
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label id="lbl_url_extra" class="block text-xs text-slate-400 mb-1">URL de Canto / Audio (opcional)</label>
+              <input type="url" id="url_extra" placeholder="https://..."
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div>
+            <label id="lbl_notas_especificas" class="block text-xs text-slate-400 mb-1">Notas de bioacústica y contexto de emisión</label>
+            <textarea id="notas_especificas" rows="2" placeholder="Describe vocalizaciones o sustrato/forófito..."
+              class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"></textarea>
+          </div>
+        </div>
+
+        <!-- Bloque 3: Ubicación Geográfica y Holdridge -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-2">
+            Ubicación Geográfica y Zona de Vida Holdridge
+          </h2>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Latitud WGS84 (°N)</label>
+              <input type="number" step="0.0001" id="latitud" value="9.5850"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Longitud WGS84 (°W)</label>
+              <input type="number" step="0.0001" id="longitud" value="-83.8250"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Elevación (m s.n.m.)</label>
+              <input type="number" id="elevacion" value="2300"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono focus:border-emerald-500 focus:outline-none" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Zona de vida Holdridge</label>
+              <select id="zona_holdridge" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none">
+                <option value="Bosque Pluvial Montano Bajo">Bosque Pluvial Montano Bajo</option>
+                <option value="Bosque Pluvial Montano">Bosque Pluvial Montano</option>
+                <option value="Páramo Pluvial Subalpino">Páramo Pluvial Subalpino</option>
+                <option value="Bosque Muy Húmedo Premontano">Bosque Muy Húmedo Premontano</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Localidad específica CBLS</label>
+              <input type="text" id="localidad" value="Sector Copey / Cordillera de Talamanca, CBLS"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Bloque 4: Campos de Investigación Biológica -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <h2 id="lbl_titulo_ecologia" class="text-sm font-bold uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-2">
+            Campos de Investigación Biológica y Ecología
+          </h2>
+
+          <div>
+            <label id="lbl_eco_1" class="block text-xs font-semibold text-slate-300 mb-1">Cromática y anatomía del espécimen</label>
+            <textarea id="eco_1" rows="3" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"></textarea>
+          </div>
+
+          <div>
+            <label id="lbl_eco_2" class="block text-xs font-semibold text-slate-300 mb-1">Etología y comportamiento en sitio</label>
+            <textarea id="eco_2" rows="3" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"></textarea>
+          </div>
+
+          <div>
+            <label id="lbl_eco_3" class="block text-xs font-semibold text-slate-300 mb-1">Cortejo, reproducción y cuidado parental</label>
+            <textarea id="eco_3" rows="3" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"></textarea>
+          </div>
+
+          <div>
+            <label id="lbl_eco_4" class="block text-xs font-semibold text-slate-300 mb-1">Relaciones intra e interespecíficas</label>
+            <textarea id="eco_4" rows="3" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"></textarea>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Datos científicos confirmados</label>
+            <textarea id="datos_cientificos" rows="3" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"></textarea>
+          </div>
+        </div>
+
+      </form>
+    </section>
+
+    <!-- Columna Derecha: Vista Previa en Tiempo Real (Markdown / JSON) -->
+    <aside class="lg:col-span-5 space-y-4">
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 sticky top-24">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+          <div class="flex gap-2">
+            <button id="tabMarkdown" class="px-3 py-1 text-xs font-semibold rounded-md bg-emerald-600 text-slate-950">
+              Ficha Markdown
+            </button>
+            <button id="tabJSON" class="px-3 py-1 text-xs font-semibold rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700">
+              Objeto JSON (App)
+            </button>
+          </div>
+          <button id="btnCopiar" class="px-3 py-1 text-xs font-medium rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400">
+            Copiar Código
+          </button>
+        </div>
+
+        <pre id="outputPreview" class="bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-[72vh] overflow-y-auto font-mono leading-relaxed"></pre>
+      </div>
+    </aside>
+
+  </main>
+
+  <script>
+    // Configuración dinámica de etiquetas según Reino
+    const CONFIG_REINO = {
+      Animalia: {
+        prefijo: "CBLS-SP-034",
+        lbl_grupo_taxonomico: "Grupo taxonómico",
+        ph_grupo_taxonomico: "Ej. Aves (Accipitriformes / Accipitridae)",
+        lbl_actividad_fenologia: "Horario de actividad",
+        ph_actividad_fenologia: "Ej. Diurna / Nocturna y crepuscular",
+        lbl_alerta_prioritaria: "Alerta ofídica / veneno / prioritario",
+        lbl_individuos: "Individuos observados en el hallazgo inicial",
+        ph_individuos: "Ej. 1 ind. (Solitario o en pareja)",
+        lbl_etiqueta_foto: "Etiqueta anatómica de la foto",
+        ph_etiqueta_foto: "Ej. Vista lateral / detalle de plumaje o escamas",
+        lbl_url_extra: "URL de Canto / Audio (opcional)",
+        lbl_notas_especificas: "Notas de bioacústica y contexto de emisión",
+        ph_notas_especificas: "Describe vocalizaciones, llamadas de alarma o contexto...",
+        lbl_titulo_ecologia: "Campos de Investigación Biológica y Ecología",
+        lbl_eco_1: "Cromática y anatomía del espécimen",
+        lbl_eco_2: "Etología y comportamiento en sitio",
+        lbl_eco_3: "Cortejo, reproducción y cuidado parental",
+        lbl_eco_4: "Relaciones intra e interespecíficas"
+      },
+      Plantae: {
+        prefijo: "CBLS-FL-001",
+        lbl_grupo_taxonomico: "Grupo botánico / Forma de vida",
+        ph_grupo_taxonomico: "Ej. Fagaceae (Árbol) / Orchidaceae (Orquídea epífita) / Sphagnaceae (Musgo)",
+        lbl_actividad_fenologia: "Fenología observada",
+        ph_actividad_fenologia: "Ej. Floración / Fructificación / Vegetativa / Con esporofitos",
+        lbl_alerta_prioritaria: "Alerta endémica / veda / toxicidad",
+        lbl_individuos: "Individuos / Cobertura observada",
+        ph_individuos: "Ej. 1 ind. adulto / Colonia de 4 ind. / Parche de 1.5 m²",
+        lbl_etiqueta_foto: "Etiqueta diagnóstica botánica de la foto",
+        ph_etiqueta_foto: "Ej. Detalle de labelo floral, corteza, bellota o cápsula",
+        lbl_url_extra: "URL de Fotografía Macro / Herbario (opcional)",
+        lbl_notas_especificas: "Microhábitat y sustrato (Forófito / Exposición)",
+        ph_notas_especificas: "Tipo de sustrato (terrestre, epífito en roble, litófito), humedad y luz...",
+        lbl_titulo_ecologia: "Campos de Investigación Botánica y Ecología",
+        lbl_eco_1: "Morfología y cromática diagnóstica",
+        lbl_eco_2: "Fisiología y adaptaciones al sitio",
+        lbl_eco_3: "Fenología, polinización y dispersión",
+        lbl_eco_4: "Relaciones ecológicas y simbiosis (micorrizas / forófitos)"
+      }
+    };
+
+    // Ejemplos predefinidos listos para probar
+    const EJEMPLOS = {
+      Animalia: {
+        nombre_cientifico: "Accipiter striatus",
+        nombre_comun: "Gavilán estriado, gavilán pajarero",
+        grupo_taxonomico: "Aves (Accipitriformes / Accipitridae)",
+        codigo_catalogo: "CBLS-SP-033",
+        categoria_uicn: "LC — Preocupación menor",
+        estado_curaduria: "Borrador local",
+        actividad_fenologia: "Diurna (mayor actividad entre dosel y sotobosque)",
+        alerta_prioritaria: true,
+        individuos_observados: "1 ind. (Solitario, desplazándose entre follaje montano)",
+        etiqueta_foto: "Vista lateral / detalle de cola larga barrada y alas cortas",
+        url_foto: "https://ejemplo.com/accipiter_striatus.jpg",
+        url_extra: "https://ejemplo.com/vocalizacion_accipiter_striatus.mp3",
+        notas_especificas: "Emite una serie rápida y aguda de notas cortas ('kik-kik-kik...') al defender el territorio de anidación.",
+        latitud: 9.585,
+        longitud: -83.830,
+        elevacion: 2200,
+        zona_holdridge: "Bosque Pluvial Montano Bajo",
+        localidad: "Sector Copey / Bosques montanos y robledales del CBLS",
+        eco_1: "Ave rapaz forestal de 24 a 34 cm con dimorfismo sexual inverso. Partes superiores gris pizarra azulado, cola larga con bandas oscuras y partes inferiores blancas barradas de rufo.",
+        eco_2: "Cazador sigiloso que patrulla el interior del bosque nuboso y bordes arbóreos mediante vuelos rápidos con aleteos enérgicos y planeos cortos entre ramas densas.",
+        eco_3: "Reproducción entre marzo y junio. Construye plataforma de ramitas en árboles altos; puesta de 3 a 5 huevos incubados principalmente por la hembra mientras el macho provee alimento.",
+        eco_4: "Depredador especializado en pequeñas aves paseriformes del bosque montano, regulando sus poblaciones e influyendo en el comportamiento de bandadas mixtas.",
+        datos_cientificos: "Cuenta con poblaciones residentes en las montañas de Costa Rica y migratorias boreales. Bioindicador de la calidad estructural del bosque montano en el CBLS."
+      },
+      Plantae: {
+        nombre_cientifico: "Quercus costaricensis",
+        nombre_comun: "Roble de altura, encino negro, roble blanco",
+        grupo_taxonomico: "Plantae — Fagaceae (Árbol emergente del dosel)",
+        codigo_catalogo: "CBLS-FL-001",
+        categoria_uicn: "LC — Preocupación menor",
+        estado_curaduria: "Borrador local",
+        actividad_fenologia: "Fructificación (presencia de bellotas) y brotes foliares nuevos",
+        alerta_prioritaria: true,
+        individuos_observados: "Rodales dominantes (especie estructural del bosque montano)",
+        etiqueta_foto: "Detalle de corteza fisurada, hojas coriáceas y bellota con cúpula",
+        url_foto: "https://ejemplo.com/quercus_costaricensis.jpg",
+        url_extra: "https://ejemplo.com/quercus_costaricensis_macro_hoja.jpg",
+        notas_especificas: "Sustrato terrestre en suelos volcánicos humíferos y ácidos de montaña. Exposición plena en el dosel superior (25–35 m) con alta condensación de neblina.",
+        latitud: 9.575,
+        longitud: -83.780,
+        elevacion: 2650,
+        zona_holdridge: "Bosque Pluvial Montano",
+        localidad: "Sector Cerro de la Muerte / Robledales de Copey, CBLS",
+        eco_1: "Árbol robusto de hasta 35 m de altura con tronco grueso y corteza grisácea profundamente fisurada. Hojas simples, alternas, coriáceas, elípticas a obovadas con margen entero o ligeramente ondulado y envés con pubescencia ferrugínea.",
+        eco_2: "Adaptado a bajas temperaturas nocturnas y alta radiación UV diurna mediante hojas gruesas esclerófilas con cutícula cerosa que reduce la pérdida hídrica y soporta vientos de altura.",
+        eco_3: "Polinización anemófila (por el viento) mediante amentos colgantes. Produce bellotas ovoides parcialmente cubiertas por una cúpula escamosa; dispersión mediada por gravedad y fauna silvestre.",
+        eco_4: "Especie clave estructural: alberga cientos de especies de epífitas (orquídeas, bromelias, musgos), mantiene simbiosis ectomicorrícica obligada en sus raíces y alimenta fauna como Melanerpes formicivorus.",
+        datos_cientificos: "Endémico de las tierras altas de Costa Rica y el oeste de Panamá (Cordillera Central y de Talamanca). Constituye la matriz forestal principal del Corredor Biológico Los Santos."
+      }
+    };
+
+    let vistaActual = "markdown";
+
+    function obtenerReinoSeleccionado() {
+      return document.querySelector('input[name="reino"]:checked').value;
+    }
+
+    function actualizarEtiquetasUI(reino) {
+      const cfg = CONFIG_REINO[reino];
+      document.getElementById("codigo_catalogo").value = cfg.prefijo;
+      document.getElementById("lbl_grupo_taxonomico").textContent = cfg.lbl_grupo_taxonomico;
+      document.getElementById("grupo_taxonomico").placeholder = cfg.ph_grupo_taxonomico;
+      document.getElementById("lbl_actividad_fenologia").textContent = cfg.lbl_actividad_fenologia;
+      document.getElementById("actividad_fenologia").placeholder = cfg.ph_actividad_fenologia;
+      document.getElementById("lbl_alerta_prioritaria").textContent = cfg.lbl_alerta_prioritaria;
+      document.getElementById("lbl_individuos").textContent = cfg.lbl_individuos;
+      document.getElementById("individuos_observados").placeholder = cfg.ph_individuos;
+      document.getElementById("lbl_etiqueta_foto").textContent = cfg.lbl_etiqueta_foto;
+      document.getElementById("etiqueta_foto").placeholder = cfg.ph_etiqueta_foto;
+      document.getElementById("lbl_url_extra").textContent = cfg.lbl_url_extra;
+      document.getElementById("lbl_notas_especificas").textContent = cfg.lbl_notas_especificas;
+      document.getElementById("notas_especificas").placeholder = cfg.ph_notas_especificas;
+      document.getElementById("lbl_titulo_ecologia").textContent = cfg.lbl_titulo_ecologia;
+      document.getElementById("lbl_eco_1").textContent = cfg.lbl_eco_1;
+      document.getElementById("lbl_eco_2").textContent = cfg.lbl_eco_2;
+      document.getElementById("lbl_eco_3").textContent = cfg.lbl_eco_3;
+      document.getElementById("lbl_eco_4").textContent = cfg.lbl_eco_4;
+      renderizarSalida();
+    }
+
+    function obtenerDatosFormulario() {
+      const reino = obtenerReinoSeleccionado();
+      return {
+        reino,
+        taxonomia: {
+          nombre_cientifico: document.getElementById("nombre_cientifico").value || "Sin definir",
+          nombre_comun: document.getElementById("nombre_comun").value || "Sin definir",
+          grupo_taxonomico: document.getElementById("grupo_taxonomico").value || "Sin definir",
+          codigo_catalogo: document.getElementById("codigo_catalogo").value,
+          categoria_uicn: document.getElementById("categoria_uicn").value,
+          estado_curaduria: document.getElementById("estado_curaduria").value,
+          actividad_o_fenologia: document.getElementById("actividad_fenologia").value || "No registrado",
+          alerta_prioritaria: document.getElementById("alerta_prioritaria").checked
+        },
+        multimedia: {
+          individuos_observados: document.getElementById("individuos_observados").value || "1 ind.",
+          url_foto_principal: document.getElementById("url_foto").value || "https://ejemplo.com/imagen.jpg",
+          etiqueta_foto: document.getElementById("etiqueta_foto").value || "Vista general",
+          url_recurso_adicional: document.getElementById("url_extra").value || "",
+          notas_bioacustica_o_sustrato: document.getElementById("notas_especificas").value || "No aplica"
+        },
+        ubicacion: {
+          latitud_wgs84: parseFloat(document.getElementById("latitud").value) || 0,
+          longitud_wgs84: parseFloat(document.getElementById("longitud").value) || 0,
+          elevacion_msnm: parseInt(document.getElementById("elevacion").value, 10) || 0,
+          zona_vida_holdridge: document.getElementById("zona_holdridge").value,
+          localidad_cbls: document.getElementById("localidad").value
+        },
+        ecologia: {
+          morfologia_o_anatomia: document.getElementById("eco_1").value || "Pendiente de curaduría.",
+          etologia_o_fisiologia: document.getElementById("eco_2").value || "Pendiente de curaduría.",
+          reproduccion_o_polinizacion: document.getElementById("eco_3").value || "Pendiente de curaduría.",
+          relaciones_ecologicas: document.getElementById("eco_4").value || "Pendiente de curaduría.",
+          datos_cientificos_confirmados: document.getElementById("datos_cientificos").value || "Pendiente de curaduría."
+        }
+      };
+    }
+
+    function generarMarkdown(data) {
+      const cfg = CONFIG_REINO[data.reino];
+      const checkAlerta = data.taxonomia.alerta_prioritaria ? "[X]" : "[ ]";
+
+      return `### **Taxonomía y datos básicos de curaduría**
+* **Nombre científico (binomio):** *${data.taxonomia.nombre_cientifico}*
+* **Nombre común / vernáculo:** ${data.taxonomia.nombre_comun}
+* **${cfg.lbl_grupo_taxonomico}:** ${data.taxonomia.grupo_taxonomico}
+* **Código de catálogo CBLS:** ${data.taxonomia.codigo_catalogo}
+* **Categoría Lista Roja UICN:** ${data.taxonomia.categoria_uicn}
+* **Estado de curaduría:** ${data.taxonomia.estado_curaduria}
+* **${cfg.lbl_actividad_fenologia}:** ${data.taxonomia.actividad_o_fenologia}
+* **${cfg.lbl_alerta_prioritaria}:** \`${checkAlerta}\`
+
+---
+
+### **Multimedia y registros**
+* **${cfg.lbl_individuos}:** ${data.multimedia.individuos_observados}
+* **URL de Fotografía Principal:** \`${data.multimedia.url_foto_principal}\`
+* **${cfg.lbl_etiqueta_foto}:** ${data.multimedia.etiqueta_foto}
+* **${cfg.lbl_url_extra}:** \`${data.multimedia.url_recurso_adicional || "No aplica"}\`
+
+---
+
+### **${cfg.lbl_notas_especificas}**
+${data.multimedia.notas_bioacustica_o_sustrato}
+
+---
+
+### **Ubicación geográfica y Zona de vida Holdridge**
+* **Latitud WGS84 (°N):** ${data.ubicacion.latitud_wgs84}
+* **Longitud WGS84 (°W):** ${data.ubicacion.longitud_wgs84}
+* **Elevación (m s.n.m.):** ${data.ubicacion.elevacion_msnm} m
+* **Zona de vida Holdridge:** ${data.ubicacion.zona_vida_holdridge}
+* **Localidad específica CBLS:** ${data.ubicacion.localidad_cbls}
+
+---
+
+### **${cfg.lbl_titulo_ecologia}**
+
+* **${cfg.lbl_eco_1}:**  
+  ${data.ecologia.morfologia_o_anatomia}
+
+* **${cfg.lbl_eco_2}:**  
+  ${data.ecologia.etologia_o_fisiologia}
+
+* **${cfg.lbl_eco_3}:**  
+  ${data.ecologia.reproduccion_o_polinizacion}
+
+* **${cfg.lbl_eco_4}:**  
+  ${data.ecologia.relaciones_ecologicas}
+
+* **Datos científicos confirmados:**  
+  ${data.ecologia.datos_cientificos_confirmados}`;
+    }
+
+    function renderizarSalida() {
+      const data = obtenerDatosFormulario();
+      const preview = document.getElementById("outputPreview");
+      preview.textContent = vistaActual === "markdown"
+        ? generarMarkdown(data)
+        : JSON.stringify(data, null, 2);
+    }
+
+    // Eventos de cambio en el formulario
+    document.querySelectorAll('input[name="reino"]').forEach(radio => {
+      radio.addEventListener("change", (e) => actualizarEtiquetasUI(e.target.value));
+    });
+
+    document.getElementById("fichaForm").addEventListener("input", renderizarSalida);
+
+    // Tabs Markdown / JSON
+    document.getElementById("tabMarkdown").addEventListener("click", () => {
+      vistaActual = "markdown";
+      document.getElementById("tabMarkdown").className = "px-3 py-1 text-xs font-semibold rounded-md bg-emerald-600 text-slate-950";
+      document.getElementById("tabJSON").className = "px-3 py-1 text-xs font-semibold rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700";
+      renderizarSalida();
+    });
+
+    document.getElementById("tabJSON").addEventListener("click", () => {
+      vistaActual = "json";
+      document.getElementById("tabJSON").className = "px-3 py-1 text-xs font-semibold rounded-md bg-emerald-600 text-slate-950";
+      document.getElementById("tabMarkdown").className = "px-3 py-1 text-xs font-semibold rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700";
+      renderizarSalida();
+    });
+
+    // Botón Cargar Ejemplo según Reino activo
+    document.getElementById("btnCargarEjemplo").addEventListener("click", () => {
+      const reino = obtenerReinoSeleccionado();
+      const ej = EJEMPLOS[reino];
+      Object.keys(ej).forEach(key => {
+        const el = document.getElementById(key);
+        if (!el) return;
+        if (el.type === "checkbox") el.checked = ej[key];
+        else el.value = ej[key];
+      });
+      renderizarSalida();
+    });
+
+    // Botón Limpiar
+    document.getElementById("btnLimpiar").addEventListener("click", () => {
+      const reino = obtenerReinoSeleccionado();
+      document.getElementById("fichaForm").reset();
+      document.querySelector(`input[name="reino"][value="${reino}"]`).checked = true;
+      actualizarEtiquetasUI(reino);
+    });
+
+    // Copiar al portapapeles
+    document.getElementById("btnCopiar").addEventListener("click", async () => {
+      const texto = document.getElementById("outputPreview").textContent;
+      await navigator.clipboard.writeText(texto);
+      const btn = document.getElementById("btnCopiar");
+      btn.textContent = "¡Copiado!";
+      setTimeout(() => (btn.textContent = "Copiar Código"), 1800);
+    });
+
+    // Exportar JSON
+    document.getElementById("btnExportarJSON").addEventListener("click", () => {
+      const data = obtenerDatosFormulario();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${data.taxonomia.codigo_catalogo.toLowerCase()}_${data.taxonomia.nombre_cientifico.toLowerCase().replace(/\s+/g, "_")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Inicialización
+    actualizarEtiquetasUI("Animalia");
+  </script>
+</body>
+</html>

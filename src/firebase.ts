@@ -155,9 +155,16 @@ export function toFirestoreSpeciesPayload(
         'Crepuscular',
         'Diurno/nocturno',
         'Permanente (Flora)',
+        'Floración',
+        'Fructificación',
+        'Vegetativa',
+        'Con esporofitos',
+        'Floración y brotes',
       ].includes(raw.activityCycle)
         ? raw.activityCycle
-        : 'Diurna',
+        : raw.taxon === 'Plantas'
+          ? 'Permanente (Flora)'
+          : 'Diurna',
     ecology: {
       chromaticsAnatomy: String(raw.ecology?.chromaticsAnatomy || '').slice(0, 8000),
       ethologyBehavior: String(raw.ecology?.ethologyBehavior || '').slice(0, 8000),
@@ -169,6 +176,15 @@ export function toFirestoreSpeciesPayload(
     synced: true,
   };
 
+  if (typeof raw.botanicalGroup === 'string' && raw.botanicalGroup.trim()) {
+    payload.botanicalGroup = raw.botanicalGroup.trim().slice(0, 160);
+  }
+  if (typeof raw.macroPhotoUrl === 'string' && raw.macroPhotoUrl.trim()) {
+    payload.macroPhotoUrl = raw.macroPhotoUrl.trim().slice(0, 2000);
+  }
+  if (typeof raw.initialAbundanceNote === 'string' && raw.initialAbundanceNote.trim()) {
+    payload.initialAbundanceNote = raw.initialAbundanceNote.trim().slice(0, 200);
+  }
   if (typeof raw.videoUrl === 'string' && raw.videoUrl.trim()) {
     payload.videoUrl = raw.videoUrl.trim().slice(0, 2000);
   }
