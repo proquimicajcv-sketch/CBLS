@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Edit3,
   FilePlus2,
@@ -13,6 +15,7 @@ import {
   Square,
   Trash2,
   Volume2,
+  X,
 } from 'lucide-react';
 import type {
   CurationStatus,
@@ -51,10 +54,12 @@ interface CatalogModuleProps {
   sightings: SightingEntry[];
   selectedSpeciesId: string | null;
   startInCreateMode: boolean;
+  autoOpenDetail?: boolean;
   currentUser: UserSession | null;
   onRequestUserSession: () => void;
   onSelectSpecies: (id: string) => void;
   onClearCreateMode: () => void;
+  onClearAutoOpenDetail?: () => void;
   onSaveSpecies: (record: SpeciesRecord, overrideAdminCode?: string) => Promise<boolean> | void;
   onDeleteSpecies: (id: string, overrideAdminCode?: string) => Promise<void> | void;
   onQuickSighting: (speciesId: string) => void;
@@ -133,10 +138,12 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   sightings,
   selectedSpeciesId,
   startInCreateMode,
+  autoOpenDetail = false,
   currentUser,
   onRequestUserSession,
   onSelectSpecies,
   onClearCreateMode,
+  onClearAutoOpenDetail,
   onSaveSpecies,
   onDeleteSpecies,
   onQuickSighting,
@@ -150,12 +157,18 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   const [mode, setMode] = useState<'view' | 'edit' | 'create'>(
     isAdmin && startInCreateMode ? 'create' : 'view',
   );
+  const [modalOpen, setModalOpen] = useState<boolean>(
+    Boolean((isAdmin && startInCreateMode) || (autoOpenDetail && activeSpecies)),
+  );
+  const modalBodyRef = useRef<HTMLDivElement>(null);
+
   const [draft, setDraft] = useState<SpeciesRecord>(() =>
     isAdmin && (startInCreateMode || !activeSpecies)
       ? createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser)
       : (activeSpecies ?? createEmptySpeciesDraft(1, currentUser)),
   );
   const [listQuery, setListQuery] = useState<string>('');
+  const [taxonFilter, setTaxonFilter] = useState<TaxonGroup | 'Todos'>('Todos');
 
   // Admin PIN Protection states
   const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
@@ -170,16 +183,30 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
   const filteredListSpecies = useMemo(() => {
     const q = listQuery.trim().toLowerCase();
-    if (!q) return species;
-    return species.filter(
-      (sp) =>
+    return species.filter((sp) => {
+      if (taxonFilter !== 'Todos' && sp.taxon !== taxonFilter) return false;
+      if (!q) return true;
+      return (
         sp.commonName.toLowerCase().includes(q) ||
         sp.scientificName.toLowerCase().includes(q) ||
         sp.catalogCode.toLowerCase().includes(q) ||
         sp.taxon.toLowerCase().includes(q) ||
-        (sp.botanicalGroup || '').toLowerCase().includes(q),
-    );
-  }, [species, listQuery]);
+        (sp.botanicalGroup || '').toLowerCase().includes(q)
+      );
+    });
+  }, [species, listQuery, taxonFilter]);
+
+  const handleCloseModal = useCallback(() => {
+    if (stopAudio) {
+      stopAudio();
+      setIsPlayingCall(false);
+      setStopAudio(null);
+    }
+    setConfirmAdminDelete(false);
+    setConfirmDeleteSightingId(null);
+    setModalOpen(false);
+    setMode('view');
+  }, [stopAudio]);
 
   useEffect(() => {
     if (!isAdmin && mode !== 'view') {
@@ -191,11 +218,22 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     if (startInCreateMode && isAdmin) {
       setMode('create');
       setDraft(createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser));
+      setModalOpen(true);
       onClearCreateMode();
     } else if (startInCreateMode && !isAdmin) {
       onClearCreateMode();
     }
   }, [startInCreateMode, isAdmin, species, currentUser, onClearCreateMode]);
+
+  useEffect(() => {
+    if (autoOpenDetail && activeSpecies) {
+      setMode('view');
+      setModalOpen(true);
+      onClearAutoOpenDetail?.();
+    } else if (autoOpenDetail && !activeSpecies) {
+      onClearAutoOpenDetail?.();
+    }
+  }, [autoOpenDetail, activeSpecies, onClearAutoOpenDetail]);
 
   useEffect(() => {
     if (mode === 'view' && activeSpecies) {
@@ -205,10 +243,55 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   }, [activeSpecies, mode]);
 
   useEffect(() => {
+    if (modalOpen && modalBodyRef.current) {
+      modalBodyRef.current.scrollTo({ top: 0 });
+    }
+  }, [modalOpen, activeSpecies?.id, mode]);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !adminPinModalOpen) {
+        handleCloseModal();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [modalOpen, adminPinModalOpen, handleCloseModal]);
+
+  useEffect(() => {
     return () => {
       if (stopAudio) stopAudio();
     };
   }, [stopAudio]);
+
+  const activeListIndex = useMemo(() => {
+    if (!activeSpecies) return -1;
+    return filteredListSpecies.findIndex((sp) => sp.id === activeSpecies.id);
+  }, [filteredListSpecies, activeSpecies]);
+
+  const handleStepSpecies = (direction: -1 | 1) => {
+    if (filteredListSpecies.length < 2 || activeListIndex < 0) return;
+    const nextIdx =
+      (activeListIndex + direction + filteredListSpecies.length) %
+      filteredListSpecies.length;
+    const nextSp = filteredListSpecies[nextIdx];
+    if (nextSp) {
+      if (stopAudio) {
+        stopAudio();
+        setIsPlayingCall(false);
+        setStopAudio(null);
+      }
+      onSelectSpecies(nextSp.id);
+      setMode('view');
+    }
+  };
 
   const speciesSightings = activeSpecies
     ? sightings.filter((o) => o.speciesId === activeSpecies.id)
@@ -289,7 +372,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     if (!activeSpecies) return;
     onDeleteSpecies(activeSpecies.id, verifiedAdminPin ?? undefined);
     setConfirmAdminDelete(false);
-    setMode(species.length <= 1 ? 'create' : 'view');
+    setModalOpen(false);
+    setMode('view');
   };
 
   const handleCopySpeciesExport = async (
@@ -433,15 +517,18 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     if (pendingAdminAction === 'edit' && activeSpecies) {
       setDraft(activeSpecies);
       setMode('edit');
+      setModalOpen(true);
     } else if (pendingAdminAction === 'delete' && activeSpecies) {
       onDeleteSpecies(activeSpecies.id, pin);
-      setMode(species.length <= 1 ? 'create' : 'view');
+      setModalOpen(false);
+      setMode('view');
     } else if (pendingAdminAction === 'save') {
       const clean = buildCleanSpeciesRecord();
       Promise.resolve(onSaveSpecies(clean, pin)).then((ok) => {
         if (ok !== false) {
           onSelectSpecies(clean.id);
           setMode('view');
+          setModalOpen(true);
         }
       });
     }
@@ -472,7 +559,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   };
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+    <div className="space-y-5">
       {/* Admin PIN Authentication Modal */}
       <AdminPinModal
         open={adminPinModalOpen}
@@ -497,121 +584,266 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
         }}
       />
 
-      {/* Left Species Selector List */}
-      <aside className="space-y-4 lg:col-span-4 lg:sticky lg:top-4 lg:self-start">
-        <Surface className="divide-y divide-border">
-          <div className="flex flex-wrap items-center justify-between gap-2 p-4">
-            <div>
-              <h2 className="text-base font-semibold text-foreground">
-                Catálogo de especímenes
-              </h2>
-              <p className="text-xs text-muted">
-                {species.length} fichas fijadas y sincronizadas
-              </p>
-            </div>
-            {isAdmin && (
-              <Button
-                tone="primary"
-                onClick={() => {
-                  setDraft(createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser));
-                  setMode('create');
-                }}
-              >
-                <FilePlus2 className="h-4 w-4" />
-                Nueva especie
-              </Button>
-            )}
+      {/* Full-Width Responsive Catalog List (Mobile 1-col, iPad/Laptop 2-col) */}
+      <Surface className="divide-y divide-border overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">
+              Catálogo de especímenes
+            </h2>
+            <p className="text-xs text-muted">
+              {species.length} fichas fijadas y sincronizadas · Toca cualquier especie para abrir su ficha completa
+            </p>
           </div>
-
-          {species.length > 0 && (
-            <div className="p-3">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-                <input
-                  type="search"
-                  placeholder="Filtrar lista (nombre, código, taxón)..."
-                  value={listQuery}
-                  onChange={(e) => setListQuery(e.target.value)}
-                  className={`${inputClassName} min-h-9 pl-9 text-xs`}
-                />
-              </div>
-            </div>
+          {isAdmin && (
+            <Button
+              tone="primary"
+              onClick={() => {
+                setDraft(createEmptySpeciesDraft(getNextCatalogIndex(species), currentUser));
+                setMode('create');
+                setModalOpen(true);
+              }}
+            >
+              <FilePlus2 className="h-4 w-4" />
+              Nueva especie
+            </Button>
           )}
+        </div>
 
-          <div className="max-h-[58vh] divide-y divide-border overflow-y-auto">
-            {species.length === 0 ? (
-              <div className="p-6 text-center text-xs text-muted">
-                No hay especies en el inventario. Haz clic en &quot;Nueva especie&quot; para ingresar la primera.
+        {species.length > 0 && (
+          <div className="grid grid-cols-1 gap-3 p-3.5 sm:grid-cols-12 sm:px-5">
+            <div className="relative sm:col-span-8">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+              <input
+                type="search"
+                placeholder="Filtrar lista (nombre común, científico, familia o código)..."
+                value={listQuery}
+                onChange={(e) => setListQuery(e.target.value)}
+                className={`${inputClassName} min-h-10 pl-9 pr-9 text-xs sm:text-sm`}
+              />
+              {listQuery && (
+                <button
+                  type="button"
+                  aria-label="Limpiar filtro"
+                  onClick={() => setListQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <div className="sm:col-span-4">
+              <select
+                aria-label="Filtrar por grupo taxonómico"
+                value={taxonFilter}
+                onChange={(e) => setTaxonFilter(e.target.value as TaxonGroup | 'Todos')}
+                className={`${inputClassName} min-h-10 text-xs sm:text-sm`}
+              >
+                <option value="Todos">Todos los grupos ({species.length})</option>
+                {TAXON_GROUPS.map((group) => {
+                  const count = species.filter((s) => s.taxon === group).length;
+                  return (
+                    <option key={group} value={group}>
+                      {group === 'Plantas' ? 'Plantas / Flora' : group} ({count})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          </div>
+        )}
+
+        {species.length === 0 ? (
+          <div className="space-y-3 p-8 text-center">
+            {!isAdmin && (
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
+                <Lock className="h-5 w-5" />
               </div>
-            ) : filteredListSpecies.length === 0 ? (
-              <div className="p-6 text-center text-xs text-muted">
-                Sin coincidencias para &quot;{listQuery}&quot;.
-              </div>
-            ) : (
-              filteredListSpecies.map((sp) => {
-                const isSelected = mode !== 'create' && activeSpecies?.id === sp.id;
-                const spSightingCount = sightings.filter(
-                  (o) => o.speciesId === sp.id,
-                ).length;
-                return (
-                  <button
-                    key={sp.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectSpecies(sp.id);
-                      setMode('view');
-                    }}
-                    className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
-                      isSelected
-                        ? 'bg-surface-elevated text-foreground'
-                        : 'hover:bg-foreground/5'
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                        <span className="font-mono text-muted">
-                          {sp.catalogCode}
-                        </span>
-                        <span className="text-muted">·</span>
-                        <span className="font-mono text-primary">Muestra</span>
-                        <span className="text-muted">·</span>
-                        <span className="text-muted">{sp.taxon}</span>
-                        {['CR', 'EN', 'VU'].includes(sp.iucn) || sp.medicalAlert ? (
-                          <>
-                            <span className="text-muted">·</span>
-                            <span className="font-mono text-coral">
-                              {sp.medicalAlert
-                                ? sp.taxon === 'Plantas'
-                                  ? 'Veda / Endémica'
-                                  : 'Ofídico'
-                                : sp.iucn}
-                            </span>
-                          </>
-                        ) : null}
-                      </div>
-                      <p className="mt-0.5 text-sm font-semibold text-foreground">
-                        {sp.commonName}
-                      </p>
-                      <p className="text-xs italic text-muted">
-                        {sp.scientificName}
-                        {sp.botanicalGroup ? ` · ${sp.botanicalGroup}` : ''}
-                      </p>
+            )}
+            <h3 className="text-base font-semibold text-foreground">
+              {isAdmin
+                ? 'No hay especies en el inventario'
+                : 'Catálogo sincronizado en espera de fichas'}
+            </h3>
+            <p className="mx-auto max-w-md text-xs leading-relaxed text-muted">
+              {isAdmin
+                ? 'Haz clic en "Nueva especie" para ingresar y sincronizar la primera ficha de muestra.'
+                : 'En cuanto el administrador agregue una especie con su código personal, aparecerá aquí automáticamente en tiempo real.'}
+            </p>
+          </div>
+        ) : filteredListSpecies.length === 0 ? (
+          <div className="space-y-2 p-8 text-center text-xs text-muted">
+            <p>Sin coincidencias para los filtros actuales.</p>
+            <Button
+              tone="quiet"
+              onClick={() => {
+                setListQuery('');
+                setTaxonFilter('Todos');
+              }}
+              className="min-h-8 text-xs"
+            >
+              Mostrar todas ({species.length})
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 divide-y divide-border md:grid-cols-2 md:gap-px md:divide-y-0 md:bg-border">
+            {filteredListSpecies.map((sp) => {
+              const isSelected = modalOpen && mode !== 'create' && activeSpecies?.id === sp.id;
+              const spSightingCount = sightings.filter(
+                (o) => o.speciesId === sp.id,
+              ).length;
+              return (
+                <button
+                  key={sp.id}
+                  type="button"
+                  onClick={() => {
+                    onSelectSpecies(sp.id);
+                    setMode('view');
+                    setModalOpen(true);
+                  }}
+                  className={`group flex w-full items-center justify-between gap-3 bg-surface px-4 py-3.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+                    isSelected
+                      ? 'bg-surface-elevated text-foreground'
+                      : 'hover:bg-surface-elevated/70 active:bg-surface-elevated'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="font-mono text-muted">
+                        {sp.catalogCode}
+                      </span>
+                      <span className="text-muted">·</span>
+                      <span className="font-mono text-primary">
+                        {sp.taxon === 'Plantas' ? 'Flora' : 'Muestra'}
+                      </span>
+                      <span className="text-muted">·</span>
+                      <span className="text-muted">{sp.taxon}</span>
+                      {['CR', 'EN', 'VU'].includes(sp.iucn) || sp.medicalAlert ? (
+                        <>
+                          <span className="text-muted">·</span>
+                          <span className="font-mono text-coral">
+                            {sp.medicalAlert
+                              ? sp.taxon === 'Plantas'
+                                ? 'Veda / Endémica'
+                                : 'Ofídico'
+                              : sp.iucn}
+                          </span>
+                        </>
+                      ) : null}
                     </div>
-                    <span className="shrink-0 font-mono text-xs text-muted">
+                    <p className="mt-0.5 text-sm font-semibold text-foreground group-hover:text-primary transition-colors">
+                      {sp.commonName}
+                    </p>
+                    <p className="text-xs italic text-muted">
+                      {sp.scientificName}
+                      {sp.botanicalGroup ? ` · ${sp.botanicalGroup}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="font-mono text-xs text-muted">
                       {spSightingCount > 0 ? `${spSightingCount} avist.` : 'Solo muestra'}
                     </span>
-                  </button>
-                );
-              })
-            )}
+                    <ChevronRight className="h-4 w-4 text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+                  </div>
+                </button>
+              );
+            })}
           </div>
-        </Surface>
-      </aside>
+        )}
+      </Surface>
 
-      {/* Right Main Detail or Create/Edit Form */}
-      <div className="min-w-0 lg:col-span-8">
-        {mode === 'view' && activeSpecies ? (
-          <Surface className="divide-y divide-border overflow-hidden">
+      {/* Responsive Popup Modal (Ventana emergente) for Species Detail & Admin Form across Mobile, iPad, and Laptop */}
+      {modalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="species-popup-title"
+          className="fixed inset-0 z-[45] flex items-end justify-center bg-background/85 p-0 backdrop-blur-sm sm:items-center sm:p-4 lg:p-6"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              handleCloseModal();
+            }
+          }}
+        >
+          <Surface
+            elevated
+            className="flex max-h-[94dvh] w-full max-w-4xl flex-col overflow-hidden rounded-t-2xl shadow-2xl sm:max-h-[90dvh] sm:rounded-card"
+          >
+            {/* Sticky Popup Top Bar */}
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-elevated px-4 py-3 sm:px-5">
+              <div className="min-w-0 flex-1">
+                {mode === 'view' && activeSpecies ? (
+                  <>
+                    <p className="truncate font-mono text-[11px] text-secondary">
+                      {activeSpecies.catalogCode} · {activeSpecies.taxon} · UICN {activeSpecies.iucn}
+                    </p>
+                    <h2
+                      id="species-popup-title"
+                      className="truncate text-base font-semibold text-foreground sm:text-lg"
+                    >
+                      {activeSpecies.commonName}
+                    </h2>
+                  </>
+                ) : (
+                  <>
+                    <p className="truncate font-mono text-[11px] text-primary">
+                      {mode === 'create' ? 'NUEVA FICHA DE MUESTRA' : `EDITANDO ${draft.catalogCode}`}
+                    </p>
+                    <h2
+                      id="species-popup-title"
+                      className="truncate text-base font-semibold text-foreground sm:text-lg"
+                    >
+                      {mode === 'create'
+                        ? 'Agregar especie de muestra'
+                        : draft.commonName || 'Editar ficha científica'}
+                    </h2>
+                  </>
+                )}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1.5">
+                {mode === 'view' && filteredListSpecies.length > 1 && activeListIndex >= 0 && (
+                  <div className="flex items-center gap-1 pr-1">
+                    <button
+                      type="button"
+                      onClick={() => handleStepSpecies(-1)}
+                      aria-label="Ficha anterior"
+                      title="Ficha anterior"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-control border border-border bg-input text-foreground hover:border-primary/50 hover:text-primary"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span className="hidden font-mono text-[11px] text-muted sm:inline px-1">
+                      {activeListIndex + 1}/{filteredListSpecies.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleStepSpecies(1)}
+                      aria-label="Ficha siguiente"
+                      title="Ficha siguiente"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-control border border-border bg-input text-foreground hover:border-primary/50 hover:text-primary"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleCloseModal}
+                  aria-label="Cerrar ventana"
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-border bg-input px-2.5 text-xs font-medium text-foreground transition-colors hover:border-coral/60 hover:text-coral"
+                >
+                  <X className="h-4 w-4" />
+                  <span className="hidden sm:inline">Cerrar</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Popup Body */}
+            <div ref={modalBodyRef} className="flex-1 overflow-y-auto overscroll-contain">
+              {mode === 'view' && activeSpecies ? (
+                <div className="divide-y divide-border">
             {/* Field Photograph & Header */}
             <div className="grid grid-cols-1 md:grid-cols-12">
               <div className="relative aspect-[16/10] bg-background md:col-span-6 md:aspect-auto">
@@ -1111,39 +1343,39 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 </span>
               )}
             </div>
-          </Surface>
-        ) : !isAdmin ? (
-          <Surface className="p-8 text-center space-y-3">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
-              <Lock className="h-5 w-5" />
             </div>
-            <h2 className="text-lg font-semibold text-foreground">
-              Catálogo sincronizado en espera de fichas
-            </h2>
-            <p className="mx-auto max-w-md text-xs leading-relaxed text-muted">
-              Aún no hay fichas de especies cargadas. En cuanto el administrador agregue una especie con su código personal, aparecerá aquí automáticamente en tiempo real para que puedas observarla y registrar avistamientos.
-            </p>
-          </Surface>
-        ) : (
-          /* Create / Edit Form View (Admin Only) */
-          <Surface>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
-              <div>
-                <h2 className="text-xl font-semibold text-foreground">
-                  {mode === 'create'
-                    ? 'Agregar especie de muestra (sin ubicación inicial)'
-                    : `Editar especie de muestra: ${draft.commonName}`}
-                </h2>
-                <p className="text-xs text-muted">
-                  La ficha se guarda solo como muestra en la colección para ir registrando sus avistamientos posteriormente.
-                </p>
+          ) : !isAdmin ? (
+            <div className="space-y-3 p-8 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
+                <Lock className="h-5 w-5" />
               </div>
-              {species.length > 0 && activeSpecies && (
-                <Button tone="quiet" onClick={() => setMode('view')}>
-                  Volver a lectura
-                </Button>
-              )}
+              <h3 className="text-lg font-semibold text-foreground">
+                Catálogo sincronizado en espera de fichas
+              </h3>
+              <p className="mx-auto max-w-md text-xs leading-relaxed text-muted">
+                Aún no hay fichas de especies cargadas. En cuanto el administrador agregue una especie con su código personal, aparecerá aquí automáticamente en tiempo real para que puedas observarla y registrar avistamientos.
+              </p>
             </div>
+          ) : (
+            /* Create / Edit Form View (Admin Only) */
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground">
+                    {mode === 'create'
+                      ? 'Agregar especie de muestra (sin ubicación inicial)'
+                      : `Editar especie de muestra: ${draft.commonName}`}
+                  </h3>
+                  <p className="text-xs text-muted">
+                    La ficha se guarda solo como muestra en la colección para ir registrando sus avistamientos posteriormente.
+                  </p>
+                </div>
+                {mode === 'edit' && activeSpecies && (
+                  <Button tone="quiet" onClick={() => setMode('view')}>
+                    Volver a lectura
+                  </Button>
+                )}
+              </div>
 
             <form onSubmit={handleSubmit} className="divide-y divide-border">
               {/* Block 0: Kingdom Selector (Fauna Animalia vs Flora Plantae) */}
@@ -1828,19 +2060,29 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-3 p-5">
-                {species.length > 0 && activeSpecies && (
-                  <Button tone="quiet" onClick={() => setMode('view')}>
-                    Cancelar
-                  </Button>
-                )}
+                <Button
+                  tone="quiet"
+                  onClick={() => {
+                    if (mode === 'edit' && activeSpecies) {
+                      setMode('view');
+                    } else {
+                      handleCloseModal();
+                    }
+                  }}
+                >
+                  Cancelar
+                </Button>
                 <Button tone="primary" type="submit">
                   Guardar ficha en catálogo CBLS
                 </Button>
               </div>
             </form>
-          </Surface>
+          </div>
         )}
-      </div>
+            </div>
+          </Surface>
+        </div>
+      )}
     </div>
   );
 };

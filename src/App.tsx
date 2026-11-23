@@ -54,6 +54,8 @@ export default function App() {
   );
   const [startCatalogInCreate, setStartCatalogInCreate] =
     useState<boolean>(false);
+  const [autoOpenSpeciesModal, setAutoOpenSpeciesModal] =
+    useState<boolean>(false);
 
   // User session identification modal
   const [userSessionModalOpen, setUserSessionModalOpen] = useState<boolean>(
@@ -79,6 +81,7 @@ export default function App() {
   const handleOpenSpeciesDetail = useCallback((speciesId: string) => {
     setSelectedSpeciesId(speciesId);
     setStartCatalogInCreate(false);
+    setAutoOpenSpeciesModal(true);
     setActiveModule('fichas');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
@@ -88,6 +91,7 @@ export default function App() {
       setUserSessionModalOpen(true);
       return;
     }
+    setAutoOpenSpeciesModal(false);
     setStartCatalogInCreate(true);
     setActiveModule('fichas');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -95,6 +99,10 @@ export default function App() {
 
   const handleClearCreateMode = useCallback(() => {
     setStartCatalogInCreate(false);
+  }, []);
+
+  const handleClearAutoOpenDetail = useCallback(() => {
+    setAutoOpenSpeciesModal(false);
   }, []);
 
   const handleQuickSighting = useCallback(
@@ -158,6 +166,10 @@ export default function App() {
           type="button"
           aria-current={isCurrent ? 'page' : undefined}
           onClick={() => {
+            if (item.id === 'fichas') {
+              setAutoOpenSpeciesModal(false);
+              setStartCatalogInCreate(false);
+            }
             setActiveModule(item.id);
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
@@ -399,10 +411,12 @@ export default function App() {
               sightings={store.sightings}
               selectedSpeciesId={selectedSpeciesId}
               startInCreateMode={startCatalogInCreate}
+              autoOpenDetail={autoOpenSpeciesModal}
               currentUser={store.userSession}
               onRequestUserSession={() => setUserSessionModalOpen(true)}
               onSelectSpecies={setSelectedSpeciesId}
               onClearCreateMode={handleClearCreateMode}
+              onClearAutoOpenDetail={handleClearAutoOpenDetail}
               onSaveSpecies={store.upsertSpecies}
               onDeleteSpecies={store.deleteSpecies}
               onQuickSighting={handleQuickSighting}

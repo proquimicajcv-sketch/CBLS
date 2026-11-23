@@ -39,7 +39,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/90 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
