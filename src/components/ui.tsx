@@ -154,6 +154,10 @@ export const SpecimenImage = ({
 }) => {
   const [failed, setFailed] = useState(false);
 
+  React.useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
   if (!src || failed) {
     return (
       <div

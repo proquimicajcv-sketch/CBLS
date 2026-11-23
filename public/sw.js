@@ -1,4 +1,4 @@
-const BUILD_HASH = /* __CBLS_BUILD_HASH__ */ 'dev-v5';
+const BUILD_HASH = /* __CBLS_BUILD_HASH__ */ 'dev-v6';
 const CACHE_NAME = `bitacora-cbls-${BUILD_HASH}`;
 
 const CORE_STATIC_ASSETS = [
@@ -18,6 +18,12 @@ const CORE_STATIC_ASSETS = [
   '/pwa-maskable-512x512.png?v=puma2',
   '/apple-touch-icon.png',
   '/apple-touch-icon.png?v=puma2',
+  '/species/didelphis_marsupialis.jpg',
+  '/species/caluromys_derbianus.jpg',
+  '/species/chironectes_minimus.jpg',
+  '/species/choloepus_hoffmanni.jpg',
+  '/species/bradypus_variegatus.jpg',
+  '/species/tamandua_mexicana.jpg',
   '/assets/aistudio/WhatsApp_Image_2026-11-12_at_10.43.47_e0604207.jpeg',
 ];
 

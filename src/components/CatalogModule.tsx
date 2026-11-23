@@ -1638,12 +1638,13 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
                   <Field
                     label="URL de Fotografía Principal"
-                    hint="Pega enlace https://..."
+                    hint="Enlace https://... o ruta local"
                     htmlFor="sp-photo-url"
                   >
                     <input
                       id="sp-photo-url"
-                      type="url"
+                      type="text"
+                      inputMode="url"
                       placeholder={
                         draftSchema.isPlant
                           ? 'https://ejemplo.com/quercus_costaricensis.jpg'
@@ -1665,7 +1666,8 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     >
                       <input
                         id="sp-macro-url"
-                        type="url"
+                        type="text"
+                        inputMode="url"
                         placeholder={draftSchema.macroOrExtraUrlPlaceholder}
                         value={draft.macroPhotoUrl || ''}
                         onChange={(e) =>
