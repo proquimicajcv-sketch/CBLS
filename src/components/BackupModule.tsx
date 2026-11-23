@@ -75,7 +75,6 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
   const [manualJson, setManualJson] = useState('');
   const [showManualImport, setShowManualImport] = useState(false);
   const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
-  const [confirmAdminReset, setConfirmAdminReset] = useState(false);
 
   const kbUsed = (storageBytes / 1024).toFixed(1);
 
@@ -122,6 +121,7 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
         open={adminPinModalOpen}
         title="Autorizar Reinicio de Base de Datos"
         actionDescription="Esta acción vaciará por completo la base de datos compartida e IndexedDB y reiniciará todos los contadores a 0 en todos los dispositivos"
+        confirmLabel="Reiniciar base a 0"
         onSuccess={(verifiedPin) => {
           setAdminPinModalOpen(false);
           onResetAllDataToZero(verifiedPin);
@@ -341,37 +341,13 @@ export const BackupModule: React.FC<BackupModuleProps> = ({
               </p>
             </div>
 
-            {confirmAdminReset ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button tone="quiet" onClick={() => setConfirmAdminReset(false)}>
-                  Cancelar
-                </Button>
-                <Button
-                  tone="coral"
-                  onClick={() => {
-                    onResetAllDataToZero();
-                    setConfirmAdminReset(false);
-                  }}
-                >
-                  <RotateCcw className="h-4 w-4 text-coral" />
-                  Confirmar reinicio a 0
-                </Button>
-              </div>
-            ) : (
-              <Button
-                tone="coral"
-                onClick={() => {
-                  if (userSession?.isAdmin) {
-                    setConfirmAdminReset(true);
-                  } else {
-                    setAdminPinModalOpen(true);
-                  }
-                }}
-              >
-                <RotateCcw className="h-4 w-4 text-coral" />
-                Reiniciar base a 0
-              </Button>
-            )}
+            <Button
+              tone="coral"
+              onClick={() => setAdminPinModalOpen(true)}
+            >
+              <RotateCcw className="h-4 w-4 text-coral" />
+              Reiniciar base a 0
+            </Button>
           </div>
         </Surface>
 

@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { KeyRound, Lock, X } from 'lucide-react';
-import { ADMIN_PIN } from '../utils/ecology';
+import { isPersonalAdminCode } from '../utils/ecology';
 import { Button, Field, inputClassName, Surface } from './ui';
 
 interface AdminPinModalProps {
   open: boolean;
   title: string;
   actionDescription: string;
+  confirmLabel?: string;
   onSuccess: (verifiedPin: string) => void;
   onClose: () => void;
 }
@@ -15,18 +16,44 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   open,
   title,
   actionDescription,
+  confirmLabel = 'Autorizar con código',
   onSuccess,
   onClose,
 }) => {
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
 
+  useEffect(() => {
+    if (!open) {
+      setPin('');
+      setError(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
+
+  const handleClose = () => {
+    setPin('');
+    setError(false);
+    onClose();
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleaned = pin.trim();
-    if (cleaned === ADMIN_PIN) {
+    if (isPersonalAdminCode(cleaned)) {
       setError(false);
       setPin('');
       onSuccess(cleaned);
@@ -39,20 +66,23 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/90 p-4"
+      aria-labelledby="admin-pin-modal-title"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-background/90 p-4 backdrop-blur-sm"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
     >
       <Surface elevated className="w-full max-w-sm rounded-xl p-5 shadow-2xl">
         <div className="flex items-center justify-between border-b border-border pb-3">
           <div className="flex items-center gap-2 text-primary">
             <Lock className="h-5 w-5" />
-            <h3 className="font-semibold text-foreground">{title}</h3>
+            <h3 id="admin-pin-modal-title" className="font-semibold text-foreground">
+              {title}
+            </h3>
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="text-muted hover:text-foreground"
             aria-label="Cerrar modal"
           >
@@ -62,17 +92,19 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <p className="text-xs text-muted leading-relaxed">
-            {actionDescription}. Ingresa la clave de administrador para autorizar esta operación.
+            {actionDescription}. Por seguridad, debes ingresar tu código personal exclusivo de administrador para autorizar esta acción.
           </p>
 
-          <Field label="Clave de Administrador" htmlFor="admin-pin-input">
+          <Field label="Código personal de administrador" htmlFor="admin-pin-input">
             <div className="relative">
               <input
                 id="admin-pin-input"
                 type="password"
+                inputMode="numeric"
+                autoComplete="off"
                 maxLength={8}
                 autoFocus
-                placeholder="Ingresa clave..."
+                placeholder="Ingresa código..."
                 value={pin}
                 onChange={(e) => {
                   setPin(e.target.value);
@@ -86,16 +118,16 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
 
           {error && (
             <p role="alert" className="text-xs font-medium text-coral text-center">
-              Clave incorrecta. Solo el administrador autorizado puede editar o eliminar especies.
+              Código incorrecto. Ningún otro código está autorizado para realizar esta acción.
             </p>
           )}
 
           <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <Button tone="quiet" onClick={onClose}>
+            <Button tone="quiet" onClick={handleClose}>
               Cancelar
             </Button>
-            <Button tone="primary" type="submit">
-              Verificar clave
+            <Button tone="coral" type="submit">
+              {confirmLabel}
             </Button>
           </div>
         </form>

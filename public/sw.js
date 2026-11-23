@@ -1,15 +1,23 @@
-const BUILD_HASH = /* __CBLS_BUILD_HASH__ */ 'dev-v4';
+const BUILD_HASH = /* __CBLS_BUILD_HASH__ */ 'dev-v5';
 const CACHE_NAME = `bitacora-cbls-${BUILD_HASH}`;
 
 const CORE_STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/manifest.json?v=puma2',
   '/icon.svg',
+  '/icon.svg?v=puma2',
+  '/favicon-32x32.png',
+  '/favicon-32x32.png?v=puma2',
   '/pwa-192x192.png',
+  '/pwa-192x192.png?v=puma2',
   '/pwa-512x512.png',
+  '/pwa-512x512.png?v=puma2',
   '/pwa-maskable-512x512.png',
+  '/pwa-maskable-512x512.png?v=puma2',
   '/apple-touch-icon.png',
+  '/apple-touch-icon.png?v=puma2',
   '/assets/aistudio/WhatsApp_Image_2026-11-12_at_10.43.47_e0604207.jpeg',
 ];
 

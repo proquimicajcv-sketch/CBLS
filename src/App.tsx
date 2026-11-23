@@ -12,6 +12,7 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
+import { AdminPinModal } from './components/AdminPinModal';
 import { BackupModule } from './components/BackupModule';
 import { CatalogModule } from './components/CatalogModule';
 import { CollectionModule } from './components/CollectionModule';
@@ -77,6 +78,59 @@ export default function App() {
     holdridgeZone: HoldridgeZoneId;
     localityHint?: string;
   } | null>(null);
+
+  // Exclusive personal admin code gate for deleting any species or sighting
+  const [pendingDelete, setPendingDelete] = useState<{
+    kind: 'species' | 'sighting';
+    id: string;
+    title: string;
+    description: string;
+    confirmLabel: string;
+    resolve: (deleted: boolean) => void;
+  } | null>(null);
+
+  const requestDeleteSpecies = useCallback(
+    (speciesId: string): Promise<boolean> => {
+      const targetSp = store.species.find((s) => s.id === speciesId);
+      const label = targetSp
+        ? `${targetSp.commonName} (${targetSp.catalogCode})`
+        : 'esta especie';
+      return new Promise<boolean>((resolve) => {
+        setPendingDelete({
+          kind: 'species',
+          id: speciesId,
+          title: 'Autorizar Eliminación de Ficha',
+          description: `Vas a eliminar permanentemente la ficha de ${label} y sus avistamientos asociados en todos los dispositivos`,
+          confirmLabel: 'Eliminar ficha',
+          resolve,
+        });
+      });
+    },
+    [store.species],
+  );
+
+  const requestDeleteSighting = useCallback(
+    (sightingId: string): Promise<boolean> => {
+      const target = store.sightings.find((s) => s.id === sightingId);
+      const sp = target
+        ? store.species.find((s) => s.id === target.speciesId)
+        : undefined;
+      const label = sp
+        ? `${sp.commonName} (${target?.observedDate ?? ''})`
+        : target?.occurrenceId || 'este avistamiento';
+      return new Promise<boolean>((resolve) => {
+        setPendingDelete({
+          kind: 'sighting',
+          id: sightingId,
+          title: 'Autorizar Eliminación de Avistamiento',
+          description: `Vas a eliminar permanentemente el avistamiento de ${label} en todos los dispositivos`,
+          confirmLabel: 'Eliminar avistamiento',
+          resolve,
+        });
+      });
+    },
+    [store.sightings, store.species],
+  );
 
   const handleOpenSpeciesDetail = useCallback((speciesId: string) => {
     setSelectedSpeciesId(speciesId);
@@ -217,27 +271,11 @@ export default function App() {
                 onClick={() => setActiveModule('portada')}
                 className="flex min-w-0 items-center gap-3 text-left"
               >
-                <svg
-                  viewBox="0 0 44 44"
-                  aria-hidden="true"
-                  className="h-9 w-9 shrink-0 rounded-lg border border-primary/35 bg-[#071D14] p-1"
-                >
-                  <path
-                    d="M6 34 L16 16 L24 26 L31 11 L38 34 Z"
-                    fill="#0D3826"
-                    stroke="#86E5B0"
-                    strokeWidth="2"
-                    strokeLinejoin="round"
-                  />
-                  <circle cx="31" cy="11" r="3" fill="#86E5B0" />
-                  <path
-                    d="M8 37 Q22 33 36 37"
-                    fill="none"
-                    stroke="#34D399"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
+                <img
+                  src="/pwa-192x192.png?v=puma2"
+                  alt="BioCBLS"
+                  className="h-9 w-9 shrink-0 rounded-lg border border-primary/40 bg-[#040B08] object-cover"
+                />
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className="font-display text-lg font-bold tracking-tight text-primary">
@@ -401,7 +439,7 @@ export default function App() {
               onOpenNewSpecies={handleOpenNewSpecies}
               onQuickSighting={handleQuickSighting}
               onEditSighting={handleEditSighting}
-              onDeleteSighting={store.deleteSighting}
+              onDeleteSighting={requestDeleteSighting}
             />
           )}
 
@@ -418,10 +456,10 @@ export default function App() {
               onClearCreateMode={handleClearCreateMode}
               onClearAutoOpenDetail={handleClearAutoOpenDetail}
               onSaveSpecies={store.upsertSpecies}
-              onDeleteSpecies={store.deleteSpecies}
+              onDeleteSpecies={requestDeleteSpecies}
               onQuickSighting={handleQuickSighting}
               onEditSighting={handleEditSighting}
-              onDeleteSighting={store.deleteSighting}
+              onDeleteSighting={requestDeleteSighting}
             />
           )}
 
@@ -433,7 +471,7 @@ export default function App() {
               onOpenSpeciesDetail={handleOpenSpeciesDetail}
               onRegisterAtPoint={handleRegisterAtMapPoint}
               onEditSighting={handleEditSighting}
-              onDeleteSighting={store.deleteSighting}
+              onDeleteSighting={requestDeleteSighting}
             />
           )}
 
@@ -445,7 +483,7 @@ export default function App() {
               onOpenSpeciesDetail={handleOpenSpeciesDetail}
               onQuickSighting={handleQuickSighting}
               onOpenNewSpecies={handleOpenNewSpecies}
-              onDeleteSpecies={store.deleteSpecies}
+              onDeleteSpecies={requestDeleteSpecies}
             />
           )}
 
@@ -526,6 +564,32 @@ export default function App() {
             } else {
               await store.addSighting(entry, mediaInput);
             }
+          }}
+        />
+
+        {/* Global Security Gate: Personal Admin Code Required for Every Deletion */}
+        <AdminPinModal
+          open={Boolean(pendingDelete)}
+          title={pendingDelete?.title ?? 'Autorizar Eliminación'}
+          actionDescription={
+            pendingDelete?.description ??
+            'Esta acción eliminará permanentemente el registro seleccionado'
+          }
+          confirmLabel={pendingDelete?.confirmLabel ?? 'Autorizar eliminación'}
+          onSuccess={(verifiedPin) => {
+            const current = pendingDelete;
+            setPendingDelete(null);
+            if (!current) return;
+            const action =
+              current.kind === 'species'
+                ? store.deleteSpecies(current.id, verifiedPin)
+                : store.deleteSighting(current.id, verifiedPin);
+            void action.then((ok) => current.resolve(Boolean(ok)));
+          }}
+          onClose={() => {
+            const current = pendingDelete;
+            setPendingDelete(null);
+            current?.resolve(false);
           }}
         />
       </div>

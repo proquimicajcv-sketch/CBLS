@@ -61,7 +61,7 @@ interface CatalogModuleProps {
   onClearCreateMode: () => void;
   onClearAutoOpenDetail?: () => void;
   onSaveSpecies: (record: SpeciesRecord, overrideAdminCode?: string) => Promise<boolean> | void;
-  onDeleteSpecies: (id: string, overrideAdminCode?: string) => Promise<void> | void;
+  onDeleteSpecies: (id: string) => Promise<boolean> | void;
   onQuickSighting: (speciesId: string) => void;
   onEditSighting: (sighting: SightingEntry) => void;
   onDeleteSighting: (sightingId: string) => Promise<boolean> | void;
@@ -170,12 +170,10 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   const [listQuery, setListQuery] = useState<string>('');
   const [taxonFilter, setTaxonFilter] = useState<TaxonGroup | 'Todos'>('Todos');
 
-  // Admin PIN Protection states
+  // Admin PIN Protection states (for editing/creating when not logged in as admin)
   const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
-  const [pendingAdminAction, setPendingAdminAction] = useState<'save' | 'edit' | 'delete' | null>(null);
+  const [pendingAdminAction, setPendingAdminAction] = useState<'save' | 'edit' | null>(null);
   const [verifiedAdminPin, setVerifiedAdminPin] = useState<string | null>(null);
-  const [confirmAdminDelete, setConfirmAdminDelete] = useState(false);
-  const [confirmDeleteSightingId, setConfirmDeleteSightingId] = useState<string | null>(null);
 
   const [isPlayingCall, setIsPlayingCall] = useState<boolean>(false);
   const [stopAudio, setStopAudio] = useState<(() => void) | null>(null);
@@ -202,8 +200,6 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
       setIsPlayingCall(false);
       setStopAudio(null);
     }
-    setConfirmAdminDelete(false);
-    setConfirmDeleteSightingId(null);
     setModalOpen(false);
     setMode('view');
   }, [stopAudio]);
@@ -238,7 +234,6 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   useEffect(() => {
     if (mode === 'view' && activeSpecies) {
       setDraft(activeSpecies);
-      setConfirmAdminDelete(false);
     }
   }, [activeSpecies, mode]);
 
@@ -358,22 +353,15 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     setAdminPinModalOpen(true);
   };
 
-  // Protected delete request (inline confirm for admin session, PIN modal otherwise)
+  // Protected delete request (ALWAYS opens personal admin code modal)
   const requestDeleteSpecies = () => {
-    if (currentUser?.isAdmin) {
-      setConfirmAdminDelete(true);
-      return;
-    }
-    setPendingAdminAction('delete');
-    setAdminPinModalOpen(true);
-  };
-
-  const executeAdminDelete = () => {
     if (!activeSpecies) return;
-    onDeleteSpecies(activeSpecies.id, verifiedAdminPin ?? undefined);
-    setConfirmAdminDelete(false);
-    setModalOpen(false);
-    setMode('view');
+    void Promise.resolve(onDeleteSpecies(activeSpecies.id)).then((deleted) => {
+      if (deleted) {
+        setModalOpen(false);
+        setMode('view');
+      }
+    });
   };
 
   const handleCopySpeciesExport = async (
@@ -518,10 +506,6 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
       setDraft(activeSpecies);
       setMode('edit');
       setModalOpen(true);
-    } else if (pendingAdminAction === 'delete' && activeSpecies) {
-      onDeleteSpecies(activeSpecies.id, pin);
-      setModalOpen(false);
-      setMode('view');
     } else if (pendingAdminAction === 'save') {
       const clean = buildCleanSpeciesRecord();
       Promise.resolve(onSaveSpecies(clean, pin)).then((ok) => {
@@ -564,18 +548,14 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
       <AdminPinModal
         open={adminPinModalOpen}
         title={
-          pendingAdminAction === 'delete'
-            ? 'Autorizar Eliminación de Especie'
-            : pendingAdminAction === 'save'
-              ? 'Autorizar Alta de Especie de Muestra'
-              : 'Autorizar Edición de Especie'
+          pendingAdminAction === 'save'
+            ? 'Autorizar Alta de Especie de Muestra'
+            : 'Autorizar Edición de Especie'
         }
         actionDescription={
-          pendingAdminAction === 'delete'
-            ? `Estás a punto de eliminar permanentemente la ficha de ${activeSpecies?.commonName || 'la especie'}`
-            : pendingAdminAction === 'save'
-              ? `Solo el código de administrador autorizado puede agregar y sincronizar especies de muestra en todos los dispositivos`
-              : `Estás a punto de modificar los datos científicos de ${activeSpecies?.commonName || 'la especie'}`
+          pendingAdminAction === 'save'
+            ? 'Solo el código de administrador autorizado puede agregar y sincronizar especies de muestra en todos los dispositivos'
+            : `Estás a punto de modificar los datos científicos de ${activeSpecies?.commonName || 'la especie'}`
         }
         onSuccess={handleAdminSuccess}
         onClose={() => {
@@ -1042,7 +1022,6 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
                 <div className="divide-y divide-border">
                   {speciesSightings.map((si) => {
-                    const isConfirming = confirmDeleteSightingId === si.id;
                     return (
                       <div
                         key={si.id}
@@ -1086,50 +1065,22 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
                         {currentUser?.isAdmin && (
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
-                            {isConfirming ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteSightingId(null)}
-                                  className="rounded border border-border bg-input px-2.5 py-1 text-xs font-medium text-foreground hover:border-foreground/40"
-                                >
-                                  Cancelar
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setConfirmDeleteSightingId(null);
-                                    void onDeleteSighting(si.id);
-                                  }}
-                                  className="inline-flex items-center gap-1 rounded border border-coral bg-coral/20 px-2.5 py-1 text-xs font-semibold text-coral hover:bg-coral/30"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  Confirmar
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setConfirmDeleteSightingId(null);
-                                    onEditSighting(si);
-                                  }}
-                                  className="inline-flex items-center gap-1 rounded border border-secondary/35 bg-secondary/10 px-2.5 py-1 text-xs font-medium text-secondary hover:bg-secondary/20"
-                                >
-                                  <Edit3 className="h-3.5 w-3.5" />
-                                  Editar
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteSightingId(si.id)}
-                                  className="inline-flex items-center gap-1 rounded border border-coral/35 bg-coral/10 px-2.5 py-1 text-xs font-medium text-coral hover:bg-coral/20"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                  Eliminar
-                                </button>
-                              </>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => onEditSighting(si)}
+                              className="inline-flex items-center gap-1 rounded border border-secondary/35 bg-secondary/10 px-2.5 py-1 text-xs font-medium text-secondary hover:bg-secondary/20"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void onDeleteSighting(si.id)}
+                              className="inline-flex items-center gap-1 rounded border border-coral/35 bg-coral/10 px-2.5 py-1 text-xs font-medium text-coral hover:bg-coral/20"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Eliminar
+                            </button>
                           </div>
                         )}
                       </div>
@@ -1317,25 +1268,10 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
               </span>
 
               {isAdmin ? (
-                confirmAdminDelete ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-coral font-medium">
-                      ¿Eliminar ficha permanentemente?
-                    </span>
-                    <Button tone="quiet" onClick={() => setConfirmAdminDelete(false)}>
-                      Cancelar
-                    </Button>
-                    <Button tone="coral" onClick={executeAdminDelete}>
-                      <Trash2 className="h-4 w-4" />
-                      Confirmar eliminación
-                    </Button>
-                  </div>
-                ) : (
-                  <Button tone="coral" onClick={requestDeleteSpecies}>
-                    <Trash2 className="h-4 w-4" />
-                    Eliminar ficha
-                  </Button>
-                )
+                <Button tone="coral" onClick={requestDeleteSpecies}>
+                  <Trash2 className="h-4 w-4" />
+                  Eliminar ficha
+                </Button>
               ) : (
                 <span className="inline-flex items-center gap-1.5 font-mono text-xs text-muted">
                   <Lock className="h-3.5 w-3.5 text-secondary" />

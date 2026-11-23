@@ -12,7 +12,6 @@ import {
   TAXON_COLOR_MAP,
   TAXON_GROUPS,
 } from '../utils/ecology';
-import { AdminPinModal } from './AdminPinModal';
 import { Button, inputClassName, SpecimenImage, Surface } from './ui';
 
 interface CollectionModuleProps {
@@ -22,7 +21,7 @@ interface CollectionModuleProps {
   onOpenSpeciesDetail: (speciesId: string) => void;
   onQuickSighting: (speciesId: string) => void;
   onOpenNewSpecies: () => void;
-  onDeleteSpecies: (speciesId: string, overrideAdminCode?: string) => void;
+  onDeleteSpecies: (speciesId: string) => Promise<boolean> | void;
 }
 
 export const CollectionModule: React.FC<CollectionModuleProps> = ({
@@ -41,11 +40,6 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
     'Todos',
   );
   const [query, setQuery] = useState<string>('');
-
-  // Admin PIN Protection states
-  const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
-  const [speciesToDelete, setSpeciesToDelete] = useState<SpeciesRecord | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const sightingStatsBySpecies = useMemo(() => {
     const map = new Map<
@@ -98,37 +92,8 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
     });
   }, [species, selectedTaxon, curationFilter, query]);
 
-  const handleDeleteClick = (sp: SpeciesRecord) => {
-    if (currentUser?.isAdmin) {
-      setConfirmDeleteId(sp.id);
-      return;
-    }
-    setSpeciesToDelete(sp);
-    setAdminPinModalOpen(true);
-  };
-
-  const handleAdminSuccess = (verifiedPin: string) => {
-    if (speciesToDelete) {
-      onDeleteSpecies(speciesToDelete.id, verifiedPin);
-      setSpeciesToDelete(null);
-    }
-    setAdminPinModalOpen(false);
-  };
-
   return (
     <div className="space-y-6">
-      {/* Admin PIN Dialog */}
-      <AdminPinModal
-        open={adminPinModalOpen}
-        title="Autorizar Eliminación de Especie"
-        actionDescription={`Deseas eliminar permanentemente la ficha de ${speciesToDelete?.commonName || 'esta especie'}`}
-        onSuccess={handleAdminSuccess}
-        onClose={() => {
-          setAdminPinModalOpen(false);
-          setSpeciesToDelete(null);
-        }}
-      />
-
       {/* Taxonomic percentage count */}
       <Surface className="divide-y divide-border">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
@@ -372,37 +337,15 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
 
                   <div className="flex items-center gap-1.5">
                     {currentUser?.isAdmin && (
-                      confirmDeleteId === sp.id ? (
-                        <>
-                          <Button
-                            tone="quiet"
-                            onClick={() => setConfirmDeleteId(null)}
-                            className="min-h-9 px-2.5 text-xs"
-                          >
-                            Cancelar
-                          </Button>
-                          <Button
-                            tone="coral"
-                            onClick={() => {
-                              onDeleteSpecies(sp.id);
-                              setConfirmDeleteId(null);
-                            }}
-                            className="min-h-9 px-2.5 text-xs"
-                          >
-                            Confirmar
-                          </Button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          title="Eliminar especie"
-                          onClick={() => handleDeleteClick(sp)}
-                          className="p-2 text-muted hover:text-coral transition-colors"
-                          aria-label="Eliminar especie"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      )
+                      <button
+                        type="button"
+                        title="Eliminar especie (requiere código personal)"
+                        onClick={() => void onDeleteSpecies(sp.id)}
+                        className="p-2 text-muted hover:text-coral transition-colors"
+                        aria-label="Eliminar especie"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     )}
                     <Button
                       tone="quiet"

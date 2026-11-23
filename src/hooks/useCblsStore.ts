@@ -32,7 +32,11 @@ import type {
   SyncBatchLog,
   UserSession,
 } from '../types/cbls';
-import { computeDatasetChecksum, validateAccessCode } from '../utils/ecology';
+import {
+  computeDatasetChecksum,
+  isPersonalAdminCode,
+  validateAccessCode,
+} from '../utils/ecology';
 import {
   idbDeleteMediaBySighting,
   idbDeleteMediaCapture,
@@ -959,14 +963,14 @@ export function useCblsStore() {
     [species, userSession, effectiveOffline, enqueueOutbox, appendCloudChangeLog],
   );
 
-  // Delete Species + its sightings (offline-safe IndexedDB + Cloud Firestore)
+  // Delete Species + its sightings (strictly requires explicit personal admin code)
   const deleteSpecies = useCallback(
-    async (speciesId: string, overrideAdminCode?: string) => {
-      const authCode = overrideAdminCode || userSession?.observerCode || '';
-      const authCheck = validateAccessCode(authCode);
-      if (!authCheck.isAdmin) {
-        setStorageError('Se requiere clave de administrador para eliminar especies.');
-        return;
+    async (speciesId: string, overrideAdminCode?: string): Promise<boolean> => {
+      if (!isPersonalAdminCode(overrideAdminCode)) {
+        setStorageError(
+          'Código de seguridad inválido. Solo el código personal exclusivo del administrador puede eliminar fichas.',
+        );
+        return false;
       }
 
       const targetSp = species.find((s) => s.id === speciesId);
@@ -980,6 +984,7 @@ export function useCblsStore() {
       void refreshMediaStats();
       setSpecies((prev) => prev.filter((s) => s.id !== speciesId));
       setSightings((prev) => prev.filter((s) => s.speciesId !== speciesId));
+      setStorageError(null);
 
       const isOfflineNow = effectiveOffline || !navigator.onLine;
       if (isOfflineNow) {
@@ -994,9 +999,9 @@ export function useCblsStore() {
           createdAt: new Date().toISOString(),
           retries: 0,
         });
-        await appendCloudChangeLog('Eliminó especie', targetLabel, 'Pendiente de sincronizar');
+        await appendCloudChangeLog('Eliminó especie', targetLabel, 'Pendiente de sincronizar', 'Jorge C');
         setStatusMessage('Especie eliminada localmente. Se actualizará en la nube al reconectar.');
-        return;
+        return true;
       }
 
       try {
@@ -1007,15 +1012,17 @@ export function useCblsStore() {
         });
         await batch.commit();
 
-        await appendCloudChangeLog('Eliminó especie', targetLabel);
+        await appendCloudChangeLog('Eliminó especie', targetLabel, undefined, 'Jorge C');
         setLastSavedIso(new Date().toISOString());
         setStatusMessage('Especie eliminada en tiempo real en todos los dispositivos.');
+        return true;
       } catch (err) {
         try {
           handleFirestoreError(err, OperationType.DELETE, `species/${speciesId}`);
         } catch {
           setStorageError('No se pudo eliminar la especie de la base en la nube.');
         }
+        return false;
       }
     },
     [
@@ -1427,17 +1434,16 @@ export function useCblsStore() {
     ],
   );
 
-  // Delete field sighting (strictly restricted to authorized personal admin code)
+  // Delete field sighting (strictly requires explicit personal admin code)
   const deleteSighting = useCallback(
     async (sightingId: string, overrideAdminCode?: string): Promise<boolean> => {
-      const authCode = overrideAdminCode || userSession?.observerCode || '';
-      const authCheck = validateAccessCode(authCode);
-      if (!authCheck.isAdmin) {
+      if (!isPersonalAdminCode(overrideAdminCode)) {
         setStorageError(
-          'Solo el código personal de administrador autorizado puede eliminar avistamientos.',
+          'Código de seguridad inválido. Solo el código personal exclusivo del administrador puede eliminar avistamientos.',
         );
         return false;
       }
+      const authCheck = validateAccessCode(overrideAdminCode ?? '');
 
       const target = sightings.find((s) => s.id === sightingId);
       const sp = target ? species.find((s) => s.id === target.speciesId) : undefined;
@@ -1654,14 +1660,14 @@ export function useCblsStore() {
     [userSession, species, sightings, appendCloudChangeLog],
   );
 
-  // Reset all data to 0 across all devices
+  // Reset all data to 0 across all devices (strictly requires explicit personal admin code)
   const resetAllDataToZero = useCallback(
-    async (overrideAdminCode?: string) => {
-      const authCode = overrideAdminCode || userSession?.observerCode || '';
-      const authCheck = validateAccessCode(authCode);
-      if (!authCheck.isAdmin) {
-        setStorageError('Se requiere clave de administrador para reiniciar la base a 0.');
-        return;
+    async (overrideAdminCode?: string): Promise<boolean> => {
+      if (!isPersonalAdminCode(overrideAdminCode)) {
+        setStorageError(
+          'Código de seguridad inválido. Solo el código personal exclusivo del administrador puede reiniciar la base a 0.',
+        );
+        return false;
       }
 
       try {
@@ -1681,14 +1687,16 @@ export function useCblsStore() {
         await Promise.all(allDeletes);
 
         localStorage.setItem(CLOUD_MIGRATED_KEY, '1');
-        await appendCloudChangeLog('Reinició base', 'Inventario restablecido a 0');
+        await appendCloudChangeLog('Reinició base', 'Inventario restablecido a 0', undefined, 'Jorge C');
         setStatusMessage('Sistema reiniciado a 0 en la nube y en todos los dispositivos.');
+        return true;
       } catch (err) {
         try {
           handleFirestoreError(err, OperationType.DELETE, 'species');
         } catch {
           setStorageError('No se pudo reiniciar la base en la nube.');
         }
+        return false;
       }
     },
     [userSession, species, sightings, syncLogs, changeLogs, appendCloudChangeLog],

@@ -78,9 +78,6 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
   );
   const [selectedBrigadista, setSelectedBrigadista] = useState<string>('Todos');
   const [showAllSightings, setShowAllSightings] = useState<boolean>(false);
-  const [confirmDeleteSightingId, setConfirmDeleteSightingId] = useState<
-    string | null
-  >(null);
 
   const featuredSpecies = species[0] ?? null;
 
@@ -637,7 +634,6 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                 <>
                   {visibleTeamSightings.map((obs) => {
                     const sp = speciesMap.get(obs.speciesId);
-                    const isConfirmingDelete = confirmDeleteSightingId === obs.id;
                     return (
                       <div
                         key={obs.id}
@@ -718,52 +714,24 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
 
                           {currentUser?.isAdmin && (
                             <div className="flex flex-wrap items-center justify-end gap-1.5 font-sans">
-                              {isConfirmingDelete ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteSightingId(null)}
-                                    className="rounded border border-border bg-input px-2 py-1 text-[11px] font-medium text-foreground hover:border-foreground/40"
-                                  >
-                                    Cancelar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setConfirmDeleteSightingId(null);
-                                      void onDeleteSighting(obs.id);
-                                    }}
-                                    className="inline-flex items-center gap-1 rounded border border-coral bg-coral/20 px-2 py-1 text-[11px] font-semibold text-coral hover:bg-coral/30"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                    Confirmar
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setConfirmDeleteSightingId(null);
-                                      onEditSighting(obs);
-                                    }}
-                                    title="Editar avistamiento"
-                                    className="inline-flex items-center gap-1 rounded border border-secondary/35 bg-secondary/10 px-2 py-1 text-[11px] font-medium text-secondary hover:bg-secondary/20"
-                                  >
-                                    <Edit3 className="h-3 w-3" />
-                                    Editar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteSightingId(obs.id)}
-                                    title="Eliminar avistamiento"
-                                    className="inline-flex items-center gap-1 rounded border border-coral/35 bg-coral/10 px-2 py-1 text-[11px] font-medium text-coral hover:bg-coral/20"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                    Eliminar
-                                  </button>
-                                </>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => onEditSighting(obs)}
+                                title="Editar avistamiento"
+                                className="inline-flex items-center gap-1 rounded border border-secondary/35 bg-secondary/10 px-2 py-1 text-[11px] font-medium text-secondary hover:bg-secondary/20"
+                              >
+                                <Edit3 className="h-3 w-3" />
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void onDeleteSighting(obs.id)}
+                                title="Eliminar avistamiento (requiere código personal)"
+                                className="inline-flex items-center gap-1 rounded border border-coral/35 bg-coral/10 px-2 py-1 text-[11px] font-medium text-coral hover:bg-coral/20"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                Eliminar
+                              </button>
                             </div>
                           )}
                         </div>

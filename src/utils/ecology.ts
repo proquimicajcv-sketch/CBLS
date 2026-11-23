@@ -55,6 +55,10 @@ export const FIELD_ACCESS_CODES = [
   '5555',
 ] as const;
 
+export function isPersonalAdminCode(rawCode?: string | null): boolean {
+  return typeof rawCode === 'string' && rawCode.trim() === ADMIN_PIN;
+}
+
 export function validateAccessCode(rawCode: string): {
   valid: boolean;
   isAdmin: boolean;

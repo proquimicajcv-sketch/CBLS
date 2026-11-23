@@ -206,9 +206,6 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
   );
   const [probePoint, setProbePoint] = useState<ProbePoint | null>(null);
   const [copiedCoords, setCopiedCoords] = useState<boolean>(false);
-  const [confirmDeleteSightingId, setConfirmDeleteSightingId] = useState<
-    string | null
-  >(null);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -875,56 +872,22 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
 
                 {currentUser?.isAdmin && (
                   <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
-                    {confirmDeleteSightingId === activeSighting.id ? (
-                      <>
-                        <span className="mr-auto text-xs font-medium text-coral">
-                          ¿Eliminar este avistamiento?
-                        </span>
-                        <Button
-                          tone="quiet"
-                          onClick={() => setConfirmDeleteSightingId(null)}
-                          className="min-h-9 text-xs"
-                        >
-                          Cancelar
-                        </Button>
-                        <Button
-                          tone="coral"
-                          onClick={() => {
-                            const idToDel = activeSighting.id;
-                            setConfirmDeleteSightingId(null);
-                            void onDeleteSighting(idToDel);
-                          }}
-                          className="min-h-9 text-xs"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Confirmar
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button
-                          tone="secondary"
-                          onClick={() => {
-                            setConfirmDeleteSightingId(null);
-                            onEditSighting(activeSighting);
-                          }}
-                          className="min-h-9 flex-1 text-xs"
-                        >
-                          <Edit3 className="h-3.5 w-3.5" />
-                          Editar avistamiento
-                        </Button>
-                        <Button
-                          tone="coral"
-                          onClick={() =>
-                            setConfirmDeleteSightingId(activeSighting.id)
-                          }
-                          className="min-h-9 flex-1 text-xs"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Eliminar avistamiento
-                        </Button>
-                      </>
-                    )}
+                    <Button
+                      tone="secondary"
+                      onClick={() => onEditSighting(activeSighting)}
+                      className="min-h-9 flex-1 text-xs"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                      Editar avistamiento
+                    </Button>
+                    <Button
+                      tone="coral"
+                      onClick={() => void onDeleteSighting(activeSighting.id)}
+                      className="min-h-9 flex-1 text-xs"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Eliminar avistamiento
+                    </Button>
                   </div>
                 )}
               </div>
