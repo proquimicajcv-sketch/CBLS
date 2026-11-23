@@ -45,6 +45,36 @@ export const ASSIGNED_USER_CODES: Record<string, AssignedCodeProfile> = {
     assignedName: 'Brigadista 5',
     isAdmin: false,
   },
+  '3348': {
+    code: '3348',
+    assignedName: 'Keylor A',
+    isAdmin: false,
+  },
+  '3375': {
+    code: '3375',
+    assignedName: 'CaroQM',
+    isAdmin: false,
+  },
+  '3394': {
+    code: '3394',
+    assignedName: 'Diego CM',
+    isAdmin: false,
+  },
+  '3302': {
+    code: '3302',
+    assignedName: 'Paula P',
+    isAdmin: false,
+  },
+  '3361': {
+    code: '3361',
+    assignedName: 'Mario M',
+    isAdmin: false,
+  },
+  '3389': {
+    code: '3389',
+    assignedName: 'Nelson A',
+    isAdmin: false,
+  },
 };
 
 export const FIELD_ACCESS_CODES = [
@@ -53,6 +83,12 @@ export const FIELD_ACCESS_CODES = [
   '3333',
   '4444',
   '5555',
+  '3348',
+  '3375',
+  '3394',
+  '3302',
+  '3361',
+  '3389',
 ] as const;
 
 export function isPersonalAdminCode(rawCode?: string | null): boolean {
