@@ -9,6 +9,7 @@ import {
   Leaf,
   Lock,
   MapPin,
+  Microscope,
   PawPrint,
   Plus,
   Search,
@@ -31,6 +32,8 @@ import {
   FAUNA_PHOTO_TAGS,
   FLORA_PHENOLOGY_CYCLES,
   FLORA_PHOTO_TAGS,
+  FUNGI_PHENOLOGY_CYCLES,
+  FUNGI_PHOTO_TAGS,
   formatSpeciesMarkdown,
   getHoldridgeZoneInfo,
   getKingdomSchema,
@@ -76,19 +79,17 @@ const IUCN_OPTIONS: { code: IucnCategory; label: string }[] = [
   { code: 'CR', label: 'CR — En peligro crítico' },
 ];
 
-function getNextCatalogIndex(speciesList: SpeciesRecord[], prefix = 'CBLS-'): number {
-  let maxNum = speciesList.length;
+function getNextCatalogIndex(speciesList: SpeciesRecord[], prefix = 'CBLS-SP-'): number {
+  let maxNum = 0;
   for (const sp of speciesList) {
-    if (prefix === 'CBLS-FL-' && !sp.catalogCode.startsWith('CBLS-FL-')) continue;
+    if (!sp.catalogCode.startsWith(prefix)) continue;
     const match = sp.catalogCode.match(/(\d+)$/);
     if (match) {
       const n = parseInt(match[1], 10);
       if (Number.isFinite(n) && n > maxNum) maxNum = n;
     }
   }
-  return prefix === 'CBLS-FL-'
-    ? speciesList.filter((s) => s.taxon === 'Plantas' || s.catalogCode.startsWith('CBLS-FL-')).length + 1
-    : maxNum + 1;
+  return maxNum + 1;
 }
 
 function createEmptySpeciesDraft(
@@ -395,30 +396,33 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
   const handleDraftTaxonSwitch = (nextTaxon: TaxonGroup) => {
     setDraft((prev) => {
-      const nextIsPlant = nextTaxon === 'Plantas';
-      const wasPlant = prev.taxon === 'Plantas';
-      if (nextIsPlant === wasPlant) {
-        return { ...prev, taxon: nextTaxon };
-      }
+      const nextSchema = getKingdomSchema(nextTaxon);
+      const prevSchema = getKingdomSchema(prev.taxon);
 
       let nextCode = prev.catalogCode;
-      if (mode === 'create') {
-        if (nextIsPlant && prev.catalogCode.startsWith('CBLS-SP-')) {
-          const floraIndex = getNextCatalogIndex(species, 'CBLS-FL-');
-          nextCode = `CBLS-FL-${String(floraIndex).padStart(3, '0')}`;
-        } else if (!nextIsPlant && prev.catalogCode.startsWith('CBLS-FL-')) {
-          const faunaIndex = getNextCatalogIndex(species, 'CBLS-');
-          nextCode = `CBLS-SP-${String(faunaIndex).padStart(3, '0')}`;
+      if (mode === 'create' && nextSchema.codePrefix !== prevSchema.codePrefix) {
+        const autoPrefixed =
+          prev.catalogCode.startsWith('CBLS-SP-') ||
+          prev.catalogCode.startsWith('CBLS-FL-') ||
+          prev.catalogCode.startsWith('CBLS-FN-') ||
+          prev.catalogCode.startsWith('CBLS-AR-');
+        if (autoPrefixed || !prev.catalogCode.trim()) {
+          const nextIdx = getNextCatalogIndex(species, nextSchema.codePrefix);
+          nextCode = `${nextSchema.codePrefix}${String(nextIdx).padStart(3, '0')}`;
         }
       }
 
-      const nextActivity = nextIsPlant
-        ? (FLORA_PHENOLOGY_CYCLES as readonly string[]).includes(prev.activityCycle)
+      const nextActivity = nextSchema.isFungi
+        ? (FUNGI_PHENOLOGY_CYCLES as readonly string[]).includes(prev.activityCycle)
           ? prev.activityCycle
-          : 'Permanente (Flora)'
-        : (FAUNA_ACTIVITY_CYCLES as readonly string[]).includes(prev.activityCycle)
-          ? prev.activityCycle
-          : 'Diurna';
+          : 'Fructificación'
+        : nextSchema.isPlant
+          ? (FLORA_PHENOLOGY_CYCLES as readonly string[]).includes(prev.activityCycle)
+            ? prev.activityCycle
+            : 'Permanente (Flora)'
+          : (FAUNA_ACTIVITY_CYCLES as readonly string[]).includes(prev.activityCycle)
+            ? prev.activityCycle
+            : 'Diurna';
 
       const nextNotes = isBlankOrDefaultBioNote(prev.bioacoustics.notes)
         ? ''
@@ -431,7 +435,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
         activityCycle: nextActivity,
         bioacoustics: {
           ...prev.bioacoustics,
-          hasCall: nextIsPlant ? false : prev.bioacoustics.hasCall,
+          hasCall: nextSchema.isPlant ? false : prev.bioacoustics.hasCall,
           notes: nextNotes,
         },
       };
@@ -480,8 +484,16 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
 
   const activeSchema = getKingdomSchema(activeSpecies?.taxon);
   const draftSchema = getKingdomSchema(draft.taxon);
-  const draftPhotoTagOptions = draftSchema.isPlant ? FLORA_PHOTO_TAGS : FAUNA_PHOTO_TAGS;
-  const draftCycleOptions = draftSchema.isPlant ? FLORA_PHENOLOGY_CYCLES : FAUNA_ACTIVITY_CYCLES;
+  const draftPhotoTagOptions = draftSchema.isFungi
+    ? FUNGI_PHOTO_TAGS
+    : draftSchema.isPlant
+      ? FLORA_PHOTO_TAGS
+      : FAUNA_PHOTO_TAGS;
+  const draftCycleOptions = draftSchema.isFungi
+    ? FUNGI_PHENOLOGY_CYCLES
+    : draftSchema.isPlant
+      ? FLORA_PHENOLOGY_CYCLES
+      : FAUNA_ACTIVITY_CYCLES;
 
   const buildCleanSpeciesRecord = (): SpeciesRecord => ({
     ...draft,
@@ -498,7 +510,10 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     initialAbundanceNote: draft.initialAbundanceNote?.trim() || undefined,
     bioacoustics: {
       ...draft.bioacoustics,
-      hasCall: draft.taxon === 'Plantas' ? false : draft.bioacoustics.hasCall,
+      hasCall:
+        draft.taxon === 'Plantas' || draft.taxon === 'Hongos'
+          ? false
+          : draft.bioacoustics.hasCall,
       notes: isBlankOrDefaultBioNote(draft.bioacoustics.notes)
         ? ''
         : draft.bioacoustics.notes.trim(),
@@ -631,7 +646,12 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   const count = species.filter((s) => s.taxon === group).length;
                   return (
                     <option key={group} value={group}>
-                      {group === 'Plantas' ? 'Plantas / Flora' : group} ({count})
+                      {group === 'Plantas'
+                        ? 'Plantas / Flora'
+                        : group === 'Hongos'
+                          ? 'Hongos / Fungi'
+                          : group}{' '}
+                      ({count})
                     </option>
                   );
                 })}
@@ -701,7 +721,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       </span>
                       <span className="text-muted">·</span>
                       <span className="font-mono text-primary">
-                        {sp.taxon === 'Plantas' ? 'Flora' : 'Muestra'}
+                        {sp.taxon === 'Plantas'
+                          ? 'Flora'
+                          : sp.taxon === 'Hongos'
+                            ? 'Fungi'
+                            : 'Muestra'}
                       </span>
                       <span className="text-muted">·</span>
                       <span className="text-muted">{sp.taxon}</span>
@@ -710,9 +734,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                           <span className="text-muted">·</span>
                           <span className="font-mono text-coral">
                             {sp.medicalAlert
-                              ? sp.taxon === 'Plantas'
-                                ? 'Veda / Endémica'
-                                : 'Ofídico'
+                              ? getKingdomSchema(sp.taxon).alertBadgeShort
                               : sp.iucn}
                           </span>
                         </>
@@ -864,7 +886,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                       </span>
                       {' · '}
                       <span className="font-semibold text-primary">
-                        {activeSchema.isPlant ? 'Flora · Muestra' : 'Especie de muestra'}
+                        {activeSchema.isFungi
+                          ? 'Fungi · Muestra'
+                          : activeSchema.isPlant
+                            ? 'Flora · Muestra'
+                            : 'Especie de muestra'}
                       </span>
                       {' · '}
                       <span>{activeSpecies.taxon}</span>
@@ -1349,12 +1375,14 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <button
                     type="button"
                     onClick={() =>
                       handleDraftTaxonSwitch(
-                        draft.taxon === 'Plantas' ? 'Aves' : draft.taxon,
+                        draft.taxon === 'Plantas' || draft.taxon === 'Hongos'
+                          ? 'Aves'
+                          : draft.taxon,
                       )
                     }
                     className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
@@ -1372,12 +1400,12 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     >
                       <PawPrint className="h-4 w-4" />
                     </span>
-                    <div>
+                    <div className="min-w-0">
                       <span className="block text-sm font-semibold text-foreground">
                         Fauna (Animalia)
                       </span>
-                      <span className="block font-mono text-[11px] text-muted">
-                        Prefijo CBLS-SP-XXX · Bioacústica y etología
+                      <span className="block truncate font-mono text-[11px] text-muted">
+                        CBLS-SP / CBLS-AR
                       </span>
                     </div>
                   </button>
@@ -1386,26 +1414,54 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     type="button"
                     onClick={() => handleDraftTaxonSwitch('Plantas')}
                     className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                      draftSchema.isPlant
+                      draftSchema.isPlant && !draftSchema.isFungi
                         ? 'border-primary bg-primary/15 text-foreground'
                         : 'border-border bg-input text-muted hover:border-foreground/30 hover:text-foreground'
                     }`}
                   >
                     <span
                       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
-                        draftSchema.isPlant
+                        draftSchema.isPlant && !draftSchema.isFungi
                           ? 'bg-primary text-primary-foreground'
                           : 'bg-background text-muted'
                       }`}
                     >
                       <Leaf className="h-4 w-4" />
                     </span>
-                    <div>
+                    <div className="min-w-0">
                       <span className="block text-sm font-semibold text-foreground">
                         Flora (Plantae)
                       </span>
-                      <span className="block font-mono text-[11px] text-muted">
-                        Prefijo CBLS-FL-XXX · Fenología, sustrato y simbiosis
+                      <span className="block truncate font-mono text-[11px] text-muted">
+                        Prefijo CBLS-FL-XXX
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDraftTaxonSwitch('Hongos')}
+                    className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      draftSchema.isFungi
+                        ? 'border-primary bg-primary/15 text-foreground'
+                        : 'border-border bg-input text-muted hover:border-foreground/30 hover:text-foreground'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
+                        draftSchema.isFungi
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted'
+                      }`}
+                    >
+                      <Microscope className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <span className="block text-sm font-semibold text-foreground">
+                        Hongos (Fungi)
+                      </span>
+                      <span className="block truncate font-mono text-[11px] text-muted">
+                        Prefijo CBLS-FN-XXX
                       </span>
                     </div>
                   </button>
@@ -1472,7 +1528,13 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                     >
                       {TAXON_GROUPS.map((t) => (
                         <option key={t} value={t}>
-                          {t === 'Plantas' ? 'Plantas (Flora / Plantae)' : t}
+                          {t === 'Plantas'
+                            ? 'Plantas (Flora / Plantae)'
+                            : t === 'Hongos'
+                              ? 'Hongos (Fungi / Líquenes)'
+                              : t === 'Arácnidos'
+                                ? 'Arácnidos (Arachnida)'
+                                : t}
                         </option>
                       ))}
                     </select>

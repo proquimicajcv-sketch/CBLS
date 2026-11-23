@@ -143,7 +143,8 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     () => speciesList.find((sp) => sp.id === speciesId) ?? null,
     [speciesList, speciesId],
   );
-  const isPlantSelected = selectedSpecies?.taxon === 'Plantas';
+  const isPlantSelected =
+    selectedSpecies?.taxon === 'Plantas' || selectedSpecies?.taxon === 'Hongos';
 
   const sortedFilteredSpecies = useMemo(() => {
     const q = speciesSearch.trim().toLowerCase();

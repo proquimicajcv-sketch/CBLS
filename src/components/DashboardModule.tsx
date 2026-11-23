@@ -107,8 +107,11 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
     ? filteredTeamSightings
     : filteredTeamSightings.slice(0, 8);
 
-  const faunaCount = species.filter((s) => s.taxon !== 'Plantas').length;
+  const faunaCount = species.filter(
+    (s) => s.taxon !== 'Plantas' && s.taxon !== 'Hongos',
+  ).length;
   const floraCount = species.filter((s) => s.taxon === 'Plantas').length;
+  const fungiCount = species.filter((s) => s.taxon === 'Hongos').length;
   const threatenedCount = species.filter((s) =>
     ['CR', 'EN', 'VU'].includes(s.iucn),
   ).length;
@@ -300,7 +303,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                 {species.length}
               </span>
               <span className="mt-1.5 text-[11px] text-white/75">
-                {faunaCount} fauna · {floraCount} flora ·{' '}
+                {faunaCount} fauna · {floraCount} flora · {fungiCount} hongos ·{' '}
                 <span className="text-coral">{threatenedCount} UICN</span>
               </span>
             </div>

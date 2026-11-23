@@ -158,6 +158,7 @@ export function toFirestoreSpeciesPayload(
         'Crepuscular/Nocturna',
         'Diurno/nocturno',
         'Permanente (Flora)',
+        'Permanente (Fungi/Liquen)',
         'Floración',
         'Fructificación',
         'Vegetativa',
@@ -167,7 +168,9 @@ export function toFirestoreSpeciesPayload(
         ? raw.activityCycle
         : raw.taxon === 'Plantas'
           ? 'Permanente (Flora)'
-          : 'Diurna',
+          : raw.taxon === 'Hongos'
+            ? 'Fructificación'
+            : 'Diurna',
     ecology: {
       chromaticsAnatomy: String(raw.ecology?.chromaticsAnatomy || '').slice(0, 8000),
       ethologyBehavior: String(raw.ecology?.ethologyBehavior || '').slice(0, 8000),

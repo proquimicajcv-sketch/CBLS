@@ -9,6 +9,7 @@ import type {
 } from '../types/cbls';
 import {
   getHoldridgeZoneInfo,
+  getKingdomSchema,
   TAXON_COLOR_MAP,
   TAXON_GROUPS,
 } from '../utils/ecology';
@@ -251,7 +252,11 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                       className="h-full w-full"
                     />
                     <span className="pointer-events-none absolute left-2.5 top-2.5 z-[3] rounded-full border border-primary/35 bg-[#04110B]/90 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-primary">
-                      {sp.taxon === 'Plantas' ? 'Flora · Fijada' : 'Muestra · Fijada'}
+                      {sp.taxon === 'Plantas'
+                        ? 'Flora · Fijada'
+                        : sp.taxon === 'Hongos'
+                          ? 'Fungi · Fijada'
+                          : 'Muestra · Fijada'}
                     </span>
                   </div>
 
@@ -278,8 +283,8 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                             : 'font-mono text-muted'
                         }
                       >
-                        {sp.medicalAlert && sp.taxon === 'Plantas'
-                          ? `UICN ${sp.iucn} · Veda/End.`
+                        {sp.medicalAlert
+                          ? `UICN ${sp.iucn} · ${getKingdomSchema(sp.taxon).alertBadgeShort}`
                           : `UICN ${sp.iucn}`}
                       </span>
                     </p>

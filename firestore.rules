@@ -99,7 +99,7 @@ service cloud.firestore {
         && data.catalogCode is string && data.catalogCode.size() >= 1 && data.catalogCode.size() <= 64
         && data.scientificName is string && data.scientificName.size() >= 1 && data.scientificName.size() <= 200
         && data.commonName is string && data.commonName.size() >= 1 && data.commonName.size() <= 200
-        && data.taxon in ['Aves', 'Anfibios', 'Reptiles', 'Mamíferos', 'Plantas', 'Insectos']
+        && data.taxon in ['Aves', 'Anfibios', 'Reptiles', 'Mamíferos', 'Plantas', 'Hongos', 'Insectos', 'Arácnidos']
         && (!('botanicalGroup' in data) || (data.botanicalGroup is string && data.botanicalGroup.size() <= 160))
         && data.iucn in ['LC', 'NT', 'VU', 'EN', 'CR']
         && data.medicalAlert is bool
@@ -111,7 +111,7 @@ service cloud.firestore {
         && data.photoTag is string && data.photoTag.size() <= 64
         && (!('initialAbundanceNote' in data) || (data.initialAbundanceNote is string && data.initialAbundanceNote.size() <= 200))
         && isValidBioacoustics(data.bioacoustics)
-        && data.activityCycle in ['Diurna', 'Nocturna', 'Crepuscular', 'Crepuscular/Nocturna', 'Diurno/nocturno', 'Permanente (Flora)', 'Floración', 'Fructificación', 'Vegetativa', 'Con esporofitos', 'Floración y brotes']
+        && data.activityCycle in ['Diurna', 'Nocturna', 'Crepuscular', 'Crepuscular/Nocturna', 'Diurno/nocturno', 'Permanente (Flora)', 'Permanente (Fungi/Liquen)', 'Floración', 'Fructificación', 'Vegetativa', 'Con esporofitos', 'Floración y brotes']
         && isValidEcology(data.ecology)
         && (!('featuredNote' in data) || (data.featuredNote is string && data.featuredNote.size() <= 500))
         && data.updatedAt is string && data.updatedAt.size() <= 64

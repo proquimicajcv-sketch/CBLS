@@ -143,7 +143,9 @@ export const TAXON_GROUPS: TaxonGroup[] = [
   'Reptiles',
   'Mamíferos',
   'Plantas',
+  'Hongos',
   'Insectos',
+  'Arácnidos',
 ];
 
 export const TAXON_COLOR_MAP: Record<TaxonGroup, string> = {
@@ -152,7 +154,9 @@ export const TAXON_COLOR_MAP: Record<TaxonGroup, string> = {
   Reptiles: '#ff8b54',
   Mamíferos: '#f2c96d',
   Plantas: '#55cb45',
+  Hongos: '#d4a3ff',
   Insectos: '#7cc6fe',
+  Arácnidos: '#f472b6',
 };
 
 export const VALID_ACTIVITY_CYCLES = [
@@ -162,6 +166,7 @@ export const VALID_ACTIVITY_CYCLES = [
   'Crepuscular/Nocturna',
   'Diurno/nocturno',
   'Permanente (Flora)',
+  'Permanente (Fungi/Liquen)',
   'Floración',
   'Fructificación',
   'Vegetativa',
@@ -187,6 +192,13 @@ export const FLORA_PHENOLOGY_CYCLES = [
   'Floración y brotes',
 ] as const;
 
+export const FUNGI_PHENOLOGY_CYCLES = [
+  'Fructificación',
+  'Permanente (Fungi/Liquen)',
+  'Vegetativa',
+  'Con esporofitos',
+] as const;
+
 export const FAUNA_PHOTO_TAGS = [
   'Vista general',
   'Ojo',
@@ -207,12 +219,29 @@ export const FLORA_PHOTO_TAGS = [
   'Cápsula / Esporofito',
 ] as const;
 
+export const FUNGI_PHOTO_TAGS = [
+  'Vista general',
+  'Cuerpo fructífero',
+  'Láminas / Poros',
+  'Sustrato / Madera',
+  'Corteza / Tallo',
+] as const;
+
 export function isPlantTaxon(taxon?: TaxonGroup | null): boolean {
   return taxon === 'Plantas';
 }
 
+export function isFungiTaxon(taxon?: TaxonGroup | null): boolean {
+  return taxon === 'Hongos';
+}
+
+export function isNonAnimalTaxon(taxon?: TaxonGroup | null): boolean {
+  return taxon === 'Plantas' || taxon === 'Hongos';
+}
+
 export interface KingdomSchemaConfig {
   isPlant: boolean;
+  isFungi: boolean;
   kingdomLabel: string;
   codePrefix: string;
   taxonGroupLabel: string;
@@ -247,6 +276,7 @@ export function getKingdomSchema(taxon?: TaxonGroup | null): KingdomSchemaConfig
   if (taxon === 'Plantas') {
     return {
       isPlant: true,
+      isFungi: false,
       kingdomLabel: 'Flora (Plantae)',
       codePrefix: 'CBLS-FL-',
       taxonGroupLabel: 'Reino / División taxonómica',
@@ -280,8 +310,82 @@ export function getKingdomSchema(taxon?: TaxonGroup | null): KingdomSchemaConfig
     };
   }
 
+  if (taxon === 'Hongos') {
+    return {
+      isPlant: true,
+      isFungi: true,
+      kingdomLabel: 'Fungi (Hongos y Líquenes)',
+      codePrefix: 'CBLS-FN-',
+      taxonGroupLabel: 'Reino / División taxonómica',
+      botanicalGroupLabel: 'Grupo micológico / Gremio trófico',
+      botanicalGroupPlaceholder:
+        'Ej. Basidiomycota (Ectomicorrícico en Quercus) / Ascomycota (Saprófito lignícola)',
+      activityLabel: 'Estado fenológico / Fructificación',
+      alertCheckboxLabel: 'Alerta toxicológica (tóxico / mortal)',
+      alertBadgeShort: 'Tóxico',
+      alertDetailLabel: '▲ Toxicidad micológica (no comestible / mortal)',
+      abundanceLabel: 'Carpóforos / Colonia observada',
+      abundancePlaceholder: 'Ej. Solitario / Gregario (8–15 carpóforos) / Cespitosa',
+      photoTagLabel: 'Etiqueta diagnóstica micológica de la foto',
+      macroOrExtraUrlLabel: 'URL de Fotografía Macro / Himenio (opcional)',
+      macroOrExtraUrlHint: 'Detalle de láminas, poros, estípite, esporada o sustrato',
+      macroOrExtraUrlPlaceholder: 'https://ejemplo.com/macro_himenio.jpg',
+      substrateOrBioHeader: 'Sustrato, microhábitat y piso altitudinal',
+      substrateOrBioNotesLabel: 'Sustrato, microhábitat y piso altitudinal',
+      substrateOrBioPlaceholder:
+        'Sustrato (madera muerta de roble, hojarasca húmeda, suelo humífero, turbera, artrópodo)...',
+      ecologySectionTitle: 'Campos de investigación micológica y ecología',
+      eco1Label: 'Morfología del carpóforo y cromática diagnóstica',
+      eco1Hint: 'Píleo, himenio (láminas/poros/espinas), estípite, volva, anillo, látex o talo liquénico',
+      eco2Label: 'Ecología trófica y adaptaciones al sustrato',
+      eco2Hint: 'Saprófito lignícola/humícola, ectomicorrícico, entomopatógeno o simbiosis liquénica',
+      eco3Label: 'Esporulación, dispersión y fenología',
+      eco3Hint: 'Época de fructificación (lluvias/neblina), esporada y vectores (viento, insectos, agua)',
+      eco4Label: 'Simbiosis (micorrizas / hospederos) y rol ecosistémico',
+      eco4Hint: 'Asociación con Quercus/coníferas, descomposición de lignina o bioindicación',
+      eco5Label: 'Datos científicos confirmados y literatura micológica regional',
+    };
+  }
+
+  if (taxon === 'Arácnidos') {
+    return {
+      isPlant: false,
+      isFungi: false,
+      kingdomLabel: 'Fauna (Animalia · Arácnidos)',
+      codePrefix: 'CBLS-AR-',
+      taxonGroupLabel: 'Grupo taxonómico',
+      botanicalGroupLabel: 'Familia / Gremio (opcional)',
+      botanicalGroupPlaceholder: 'Ej. Theraphosidae / Araneidae / Ctenidae',
+      activityLabel: 'Horario de actividad',
+      alertCheckboxLabel: 'Alerta médica / aracnoidismo clínico',
+      alertBadgeShort: 'Médico',
+      alertDetailLabel: '▲ Veneno de importancia médica (aracnoidismo)',
+      abundanceLabel: 'Individuos observados en muestra (opcional)',
+      abundancePlaceholder: 'Ej. 1 ind. en madriguera / En tela orbital',
+      photoTagLabel: 'Etiqueta anatómica de la foto',
+      macroOrExtraUrlLabel: 'URL de Audio / Vibración (opcional)',
+      macroOrExtraUrlHint: 'MP3, WAV o registro de estridulación',
+      macroOrExtraUrlPlaceholder: 'https://ejemplo.com/estridulacion.mp3',
+      substrateOrBioHeader: 'Registro bioacústico / vibratorio de referencia',
+      substrateOrBioNotesLabel: 'Notas de comunicación vibratoria, seda o estridulación',
+      substrateOrBioPlaceholder:
+        'Describe estridulación defensiva, tamborileo de cortejo o tipo de tela...',
+      ecologySectionTitle: 'Campos de investigación aracnológica y ecología',
+      eco1Label: 'Cromática y anatomía del espécimen',
+      eco1Hint: 'Cefalotórax, disposición ocular, quelíceros, pilosidad, setas urticantes y abdomen',
+      eco2Label: 'Etología, arquitectura de tela y comportamiento',
+      eco2Hint: 'Tipo de tela o caza errante, refugio/madriguera, postura defensiva y estrato',
+      eco3Label: 'Cortejo, reproducción y cuidado maternal',
+      eco3Hint: 'Cortejo vibratorio, ooteca (saco de huevos), dispersión de arañitas y longevidad',
+      eco4Label: 'Relaciones intra e interespecíficas',
+      eco4Hint: 'Control biológico de insectos, depredadores (avispas Pompilidae, aves) e importancia médica',
+      eco5Label: 'Datos científicos confirmados y literatura aracnológica regional',
+    };
+  }
+
   return {
     isPlant: false,
+    isFungi: false,
     kingdomLabel: 'Fauna (Animalia)',
     codePrefix: 'CBLS-SP-',
     taxonGroupLabel: 'Grupo taxonómico',

@@ -4,7 +4,9 @@ export type TaxonGroup =
   | 'Reptiles'
   | 'Mamíferos'
   | 'Plantas'
-  | 'Insectos';
+  | 'Hongos'
+  | 'Insectos'
+  | 'Arácnidos';
 
 export type HoldridgeZoneId =
   | 'bmh-P'
@@ -29,7 +31,10 @@ export type PhotoTag =
   | 'Hoja / Follaje'
   | 'Corteza / Tallo'
   | 'Detalle floral'
-  | 'Cápsula / Esporofito';
+  | 'Cápsula / Esporofito'
+  | 'Cuerpo fructífero'
+  | 'Láminas / Poros'
+  | 'Sustrato / Madera';
 
 export interface HoldridgeZoneInfo {
   id: HoldridgeZoneId;
@@ -65,6 +70,7 @@ export type ActivityCycleOption =
   | 'Crepuscular/Nocturna'
   | 'Diurno/nocturno'
   | 'Permanente (Flora)'
+  | 'Permanente (Fungi/Liquen)'
   | 'Floración'
   | 'Fructificación'
   | 'Vegetativa'
