@@ -1,4 +1,4 @@
-const BUILD_HASH = /* __CBLS_BUILD_HASH__ */ 'dev-v13';
+const BUILD_HASH = /* __CBLS_BUILD_HASH__ */ 'dev-v14';
 const CACHE_NAME = `bitacora-cbls-${BUILD_HASH}`;
 
 const CORE_STATIC_ASSETS = [
