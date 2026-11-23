@@ -34,6 +34,7 @@ import {
   formatSpeciesMarkdown,
   getHoldridgeZoneInfo,
   getKingdomSchema,
+  isBlankOrDefaultBioNote,
   playBioacousticPreview,
   TAXON_GROUPS,
 } from '../utils/ecology';
@@ -117,7 +118,7 @@ function createEmptySpeciesDraft(
       audioUrl: '',
       dominantFreqKhz: 2.4,
       pulsePattern: 'pulse',
-      notes: isPlant ? '' : 'No aplica (Sin canto).',
+      notes: '',
     },
     activityCycle: isPlant ? 'Permanente (Flora)' : 'Diurna',
     ecology: {
@@ -161,6 +162,17 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     Boolean((isAdmin && startInCreateMode) || (autoOpenDetail && activeSpecies)),
   );
   const modalBodyRef = useRef<HTMLDivElement>(null);
+  const backdropMouseDownRef = useRef<boolean>(false);
+
+  const prepareDraftForEdit = useCallback((sp: SpeciesRecord): SpeciesRecord => ({
+    ...sp,
+    bioacoustics: {
+      ...sp.bioacoustics,
+      notes: isBlankOrDefaultBioNote(sp.bioacoustics.notes)
+        ? ''
+        : sp.bioacoustics.notes,
+    },
+  }), []);
 
   const [draft, setDraft] = useState<SpeciesRecord>(() =>
     isAdmin && (startInCreateMode || !activeSpecies)
@@ -249,7 +261,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     document.body.style.overflow = 'hidden';
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !adminPinModalOpen) {
+      if (e.key === 'Escape' && !adminPinModalOpen && mode === 'view') {
         handleCloseModal();
       }
     };
@@ -258,7 +270,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
       document.body.style.overflow = prevOverflow;
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [modalOpen, adminPinModalOpen, handleCloseModal]);
+  }, [modalOpen, adminPinModalOpen, mode, handleCloseModal]);
 
   useEffect(() => {
     return () => {
@@ -345,7 +357,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
   // Protected edit request (direct for admin session, PIN modal otherwise)
   const requestEditSpecies = () => {
     if (currentUser?.isAdmin && activeSpecies) {
-      setDraft(activeSpecies);
+      setDraft(prepareDraftForEdit(activeSpecies));
       setMode('edit');
       return;
     }
@@ -408,12 +420,9 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
           ? prev.activityCycle
           : 'Diurna';
 
-      const currentNotes = prev.bioacoustics.notes?.trim() || '';
-      const nextNotes = nextIsPlant
-        ? currentNotes === 'No aplica (Sin canto).'
-          ? ''
-          : prev.bioacoustics.notes
-        : currentNotes || 'No aplica (Sin canto).';
+      const nextNotes = isBlankOrDefaultBioNote(prev.bioacoustics.notes)
+        ? ''
+        : prev.bioacoustics.notes;
 
       return {
         ...prev,
@@ -490,11 +499,9 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     bioacoustics: {
       ...draft.bioacoustics,
       hasCall: draft.taxon === 'Plantas' ? false : draft.bioacoustics.hasCall,
-      notes:
-        draft.bioacoustics.notes.trim() ||
-        (draft.taxon === 'Plantas'
-          ? 'Sin notas de sustrato registradas.'
-          : 'No aplica (Sin canto).'),
+      notes: isBlankOrDefaultBioNote(draft.bioacoustics.notes)
+        ? ''
+        : draft.bioacoustics.notes.trim(),
     },
     creatorName: draft.creatorName || currentUser?.observerName || 'Administrador',
   });
@@ -503,7 +510,7 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
     setVerifiedAdminPin(pin);
     setAdminPinModalOpen(false);
     if (pendingAdminAction === 'edit' && activeSpecies) {
-      setDraft(activeSpecies);
+      setDraft(prepareDraftForEdit(activeSpecies));
       setMode('edit');
       setModalOpen(true);
     } else if (pendingAdminAction === 'save') {
@@ -739,10 +746,18 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
           aria-modal="true"
           aria-labelledby="species-popup-title"
           className="fixed inset-0 z-[45] flex items-end justify-center bg-background/85 p-0 backdrop-blur-sm sm:items-center sm:p-4 lg:p-6"
+          onMouseDown={(e) => {
+            backdropMouseDownRef.current = e.target === e.currentTarget;
+          }}
           onClick={(e) => {
-            if (e.target === e.currentTarget) {
+            if (
+              mode === 'view' &&
+              backdropMouseDownRef.current &&
+              e.target === e.currentTarget
+            ) {
               handleCloseModal();
             }
+            backdropMouseDownRef.current = false;
           }}
         >
           <Surface
@@ -1174,18 +1189,14 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 <h3 className="text-base font-semibold text-foreground">
                   {activeSchema.substrateOrBioHeader}
                 </h3>
-                {!activeSchema.isPlant && (
-                  <p className="text-xs text-muted">
-                    Estado:{' '}
-                    <span className="font-medium text-foreground">
-                      {activeSpecies.bioacoustics.hasCall || activeSpecies.bioacoustics.audioUrl
-                        ? `Sí aplica (Posee canto / audio)`
-                        : 'No aplica (Sin canto)'}
-                    </span>
-                  </p>
-                )}
                 <p className="pt-1 text-sm leading-relaxed text-foreground/90">
-                  {activeSpecies.bioacoustics.notes || 'Sin notas registradas.'}
+                  {!isBlankOrDefaultBioNote(activeSpecies.bioacoustics.notes)
+                    ? activeSpecies.bioacoustics.notes.trim()
+                    : !activeSchema.isPlant &&
+                        (activeSpecies.bioacoustics.hasCall ||
+                          activeSpecies.bioacoustics.audioUrl)
+                      ? 'Audio de referencia disponible.'
+                      : 'No aplica'}
                 </p>
               </div>
               {(!activeSchema.isPlant &&
@@ -1748,11 +1759,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                           Registro bioacústico
                         </h3>
                         <p className="text-xs text-muted">
-                          Define si el taxón posee canto o estridulación
+                          Si dejas las notas en blanco, la ficha mostrará «No aplica»; de lo contrario se mostrará exactamente lo que escribas.
                         </p>
                       </div>
 
-                      <div role="group" aria-label="Estado bioacústico" className="flex flex-wrap gap-2">
+                      <div role="group" aria-label="Audio sintético de referencia" className="flex flex-wrap gap-2">
                         <Button
                           tone={!draft.bioacoustics.hasCall ? 'primary' : 'quiet'}
                           onClick={() =>
@@ -1761,12 +1772,11 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                               bioacoustics: {
                                 ...p.bioacoustics,
                                 hasCall: false,
-                                notes: p.bioacoustics.notes || 'No aplica (Sin canto).',
                               },
                             }))
                           }
                         >
-                          No aplica (Sin canto)
+                          Sin audio sintético
                         </Button>
                         <Button
                           tone={draft.bioacoustics.hasCall ? 'primary' : 'quiet'}
@@ -1782,10 +1792,30 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                             }))
                           }
                         >
-                          Sí aplica (Posee canto)
+                          Configurar audio / frecuencia
                         </Button>
                       </div>
                     </div>
+
+                    <Field
+                      label={draftSchema.substrateOrBioNotesLabel}
+                      hint="Opcional: déjalo en blanco si no aplica"
+                      htmlFor="sp-bio-notes"
+                    >
+                      <textarea
+                        id="sp-bio-notes"
+                        rows={3}
+                        placeholder={draftSchema.substrateOrBioPlaceholder}
+                        value={draft.bioacoustics.notes}
+                        onChange={(e) =>
+                          setDraft((p) => ({
+                            ...p,
+                            bioacoustics: { ...p.bioacoustics, notes: e.target.value },
+                          }))
+                        }
+                        className={textareaClassName}
+                      />
+                    </Field>
 
                     {draft.bioacoustics.hasCall && (
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -1839,25 +1869,6 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                         </Field>
                       </div>
                     )}
-
-                    <Field
-                      label={draftSchema.substrateOrBioNotesLabel}
-                      htmlFor="sp-bio-notes"
-                    >
-                      <textarea
-                        id="sp-bio-notes"
-                        rows={2}
-                        placeholder={draftSchema.substrateOrBioPlaceholder}
-                        value={draft.bioacoustics.notes}
-                        onChange={(e) =>
-                          setDraft((p) => ({
-                            ...p,
-                            bioacoustics: { ...p.bioacoustics, notes: e.target.value },
-                          }))
-                        }
-                        className={textareaClassName}
-                      />
-                    </Field>
                   </>
                 )}
               </div>

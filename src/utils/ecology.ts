@@ -312,6 +312,15 @@ export function getKingdomSchema(taxon?: TaxonGroup | null): KingdomSchemaConfig
   };
 }
 
+export function isBlankOrDefaultBioNote(text?: string | null): boolean {
+  if (!text) return true;
+  const cleaned = text.trim();
+  if (!cleaned) return true;
+  return /^(no aplica(\s*\(sin canto\))?\.?|sin notas registradas\.?|sin notas de sustrato registradas\.?)$/i.test(
+    cleaned,
+  );
+}
+
 export function formatSpeciesMarkdown(sp: SpeciesRecord): string {
   const cfg = getKingdomSchema(sp.taxon);
   const checkAlert = sp.medicalAlert ? '[X]' : '[ ]';
@@ -340,7 +349,7 @@ ${cfg.isPlant ? `* **${cfg.macroOrExtraUrlLabel}:** \`${sp.macroPhotoUrl || 'No 
 ---
 
 ### **${cfg.substrateOrBioNotesLabel}**
-${sp.bioacoustics.notes || 'Sin notas registradas.'}
+${isBlankOrDefaultBioNote(sp.bioacoustics.notes) ? 'No aplica' : sp.bioacoustics.notes.trim()}
 
 ---
 

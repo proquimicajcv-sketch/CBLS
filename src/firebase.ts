@@ -113,9 +113,11 @@ export function toFirestoreSpeciesPayload(
   nowIso: string,
 ): SpeciesRecord {
   const id = sanitizeFirestoreId(raw.id, 'sp');
+  const rawBioNotes =
+    typeof raw.bioacoustics?.notes === 'string' ? raw.bioacoustics.notes.trim() : '';
   const bio: SpeciesRecord['bioacoustics'] = {
     hasCall: Boolean(raw.bioacoustics?.hasCall),
-    notes: String(raw.bioacoustics?.notes || 'No aplica (Sin canto).').slice(0, 2000),
+    notes: rawBioNotes.slice(0, 2000),
   };
 
   if (typeof raw.bioacoustics?.audioUrl === 'string' && raw.bioacoustics.audioUrl.trim()) {
