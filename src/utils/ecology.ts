@@ -159,6 +159,7 @@ export const VALID_ACTIVITY_CYCLES = [
   'Diurna',
   'Nocturna',
   'Crepuscular',
+  'Crepuscular/Nocturna',
   'Diurno/nocturno',
   'Permanente (Flora)',
   'Floración',
@@ -172,6 +173,7 @@ export const FAUNA_ACTIVITY_CYCLES = [
   'Diurna',
   'Nocturna',
   'Crepuscular',
+  'Crepuscular/Nocturna',
   'Diurno/nocturno',
   'Permanente (Flora)',
 ] as const;

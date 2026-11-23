@@ -155,6 +155,7 @@ export function toFirestoreSpeciesPayload(
         'Diurna',
         'Nocturna',
         'Crepuscular',
+        'Crepuscular/Nocturna',
         'Diurno/nocturno',
         'Permanente (Flora)',
         'Floración',

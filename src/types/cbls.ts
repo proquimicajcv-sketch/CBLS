@@ -62,6 +62,7 @@ export type ActivityCycleOption =
   | 'Diurna'
   | 'Nocturna'
   | 'Crepuscular'
+  | 'Crepuscular/Nocturna'
   | 'Diurno/nocturno'
   | 'Permanente (Flora)'
   | 'Floración'
