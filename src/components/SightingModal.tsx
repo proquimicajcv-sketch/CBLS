@@ -30,6 +30,7 @@ import {
   Button,
   Field,
   inputClassName,
+  SpecimenImage,
   StepperInput,
   Surface,
   textareaClassName,
@@ -712,10 +713,13 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
                 {photoPreviewUrl && photoFile ? (
                   <div className="space-y-1.5 pt-1">
-                    <img
+                    <SpecimenImage
                       src={photoPreviewUrl}
                       alt="Vista previa de fotografía capturada"
-                      className="h-28 w-full rounded-md border border-border object-cover"
+                      scientificName={photoFile.name}
+                      title="Vista previa de fotografía capturada"
+                      subtitle={formatSize(photoFile.size)}
+                      className="h-36 w-full rounded-md border border-border"
                     />
                     <p className="truncate font-mono text-[11px] text-secondary">
                       {photoFile.name} · {formatSize(photoFile.size)}
@@ -725,10 +729,12 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                   existingLocalPhotoPreview &&
                   !removeExistingPhoto && (
                     <div className="space-y-1.5 pt-1">
-                      <img
+                      <SpecimenImage
                         src={existingLocalPhotoPreview}
                         alt="Fotografía local guardada en este avistamiento"
-                        className="h-28 w-full rounded-md border border-border object-cover"
+                        scientificName="Registro de campo"
+                        title="Fotografía local del avistamiento"
+                        className="h-36 w-full rounded-md border border-border"
                       />
                       <p className="truncate font-mono text-[11px] text-secondary">
                         Foto local guardada en el dispositivo

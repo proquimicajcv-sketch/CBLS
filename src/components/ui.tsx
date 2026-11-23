@@ -1,5 +1,15 @@
-import React, { useState, type ComponentProps } from 'react';
-import { Minus, Plus, ImageOff } from 'lucide-react';
+import React, { useEffect, useRef, useState, type ComponentProps } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  Minus,
+  Plus,
+  ImageOff,
+  Maximize2,
+  X,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+} from 'lucide-react';
 
 export const Surface = ({
   inset = false,
@@ -141,20 +151,355 @@ export const StepperInput = ({
   );
 };
 
+export const ImageLightbox = ({
+  open,
+  src,
+  alt,
+  title,
+  scientificName,
+  subtitle,
+  onClose,
+}: {
+  open: boolean;
+  src: string;
+  alt: string;
+  title?: string;
+  scientificName?: string;
+  subtitle?: string;
+  onClose: () => void;
+}) => {
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+
+  const dragStartRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const movedRef = useRef(false);
+  const pinchStartRef = useRef<{ distance: number; zoom: number } | null>(null);
+  const lastTapRef = useRef<number>(0);
+
+  const clampZoom = (next: number) => Math.min(4, Math.max(1, Number(next.toFixed(2))));
+
+  const resetView = () => {
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+  };
+
+  const applyZoom = (next: number) => {
+    const clamped = clampZoom(next);
+    setZoom(clamped);
+    if (clamped <= 1) {
+      setOffset({ x: 0, y: 0 });
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    resetView();
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onClose();
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        setZoom((z) => clampZoom(z + 0.5));
+      } else if (e.key === '-') {
+        e.preventDefault();
+        setZoom((z) => {
+          const next = clampZoom(z - 0.5);
+          if (next <= 1) setOffset({ x: 0, y: 0 });
+          return next;
+        });
+      } else if (e.key === '0') {
+        e.preventDefault();
+        resetView();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [open, onClose]);
+
+  if (!open || typeof document === 'undefined') return null;
+
+  const getTouchDistance = (touches: React.TouchList) => {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') return;
+    if (zoom <= 1) return;
+    e.preventDefault();
+    movedRef.current = false;
+    setIsDragging(true);
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      ox: offset.x,
+      oy: offset.y,
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') return;
+    if (!isDragging || !dragStartRef.current) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+      movedRef.current = true;
+    }
+    setOffset({
+      x: dragStartRef.current.ox + dx,
+      y: dragStartRef.current.oy + dy,
+    });
+  };
+
+  const handlePointerUp = () => {
+    setIsDragging(false);
+    dragStartRef.current = null;
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      pinchStartRef.current = {
+        distance: getTouchDistance(e.touches),
+        zoom,
+      };
+      dragStartRef.current = null;
+      setIsDragging(false);
+      return;
+    }
+    if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTapRef.current < 280) {
+        lastTapRef.current = 0;
+        applyZoom(zoom > 1.1 ? 1 : 2.25);
+        return;
+      }
+      lastTapRef.current = now;
+
+      if (zoom > 1) {
+        movedRef.current = false;
+        setIsDragging(true);
+        dragStartRef.current = {
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+          ox: offset.x,
+          oy: offset.y,
+        };
+      }
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && pinchStartRef.current) {
+      const dist = getTouchDistance(e.touches);
+      const scaleFactor = dist / Math.max(1, pinchStartRef.current.distance);
+      applyZoom(pinchStartRef.current.zoom * scaleFactor);
+      return;
+    }
+    if (e.touches.length === 1 && dragStartRef.current && zoom > 1) {
+      const dx = e.touches[0].clientX - dragStartRef.current.x;
+      const dy = e.touches[0].clientY - dragStartRef.current.y;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+        movedRef.current = true;
+      }
+      setOffset({
+        x: dragStartRef.current.ox + dx,
+        y: dragStartRef.current.oy + dy,
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    pinchStartRef.current = null;
+    dragStartRef.current = null;
+    setIsDragging(false);
+  };
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.35 : -0.35;
+    applyZoom(zoom + delta);
+  };
+
+  const headingTitle = title || alt;
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Vista detallada de ${headingTitle}`}
+      className="fixed inset-0 z-[120] flex flex-col bg-[#020805]/95 text-foreground backdrop-blur-md"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.target === e.currentTarget && !movedRef.current) {
+          onClose();
+        }
+      }}
+    >
+      {/* Top Info & Close Bar */}
+      <div
+        className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#04110B]/90 px-4 py-3 sm:px-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-white sm:text-base">
+            {headingTitle}
+          </p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
+            {scientificName && (
+              <span className="truncate italic text-primary/90">{scientificName}</span>
+            )}
+            {scientificName && subtitle && <span aria-hidden="true">·</span>}
+            {subtitle && <span className="truncate font-mono text-[11px]">{subtitle}</span>}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Cerrar vista detallada"
+          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-control border border-white/15 bg-white/5 px-3 text-xs font-semibold text-white transition-colors hover:border-coral/60 hover:bg-coral/15 hover:text-coral focus-visible:outline-2 focus-visible:outline-primary"
+        >
+          <X className="h-5 w-5" />
+          <span className="hidden sm:inline">Cerrar</span>
+        </button>
+      </div>
+
+      {/* Main Zoomable Image Stage */}
+      <div
+        className={`relative flex flex-1 items-center justify-center overflow-hidden p-3 sm:p-6 touch-none select-none ${
+          zoom > 1 ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-zoom-in'
+        }`}
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (e.target === e.currentTarget && !movedRef.current) {
+            onClose();
+          }
+          movedRef.current = false;
+        }}
+      >
+        <img
+          src={src}
+          alt={alt}
+          referrerPolicy="no-referrer"
+          draggable={false}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            applyZoom(zoom > 1.1 ? 1 : 2.25);
+          }}
+          style={{
+            transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${zoom})`,
+          }}
+          className={`max-h-[calc(100dvh-156px)] max-w-[96vw] rounded-lg object-contain shadow-2xl sm:max-w-[92vw] ${
+            isDragging ? '' : 'transition-transform duration-150 ease-out'
+          }`}
+        />
+      </div>
+
+      {/* Bottom Zoom Controls Bar (Thumb-friendly) */}
+      <div
+        className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-[#04110B]/90 px-4 py-3 sm:px-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="hidden text-xs text-muted md:block">
+          Doble clic o rueda del ratón para acercar · Arrastra para explorar detalles
+        </p>
+        <p className="text-[11px] text-muted md:hidden">
+          Pellizca o toca dos veces para acercar
+        </p>
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => applyZoom(zoom - 0.5)}
+            disabled={zoom <= 1}
+            aria-label="Alejar imagen"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-control border border-white/15 bg-white/5 text-white transition-colors hover:border-primary/50 hover:text-primary disabled:opacity-35"
+          >
+            <ZoomOut className="h-4 w-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={resetView}
+            title="Restablecer al 100%"
+            className="inline-flex h-11 min-w-[68px] items-center justify-center rounded-control border border-white/15 bg-white/5 px-3 font-mono text-xs font-semibold tabular-nums text-white transition-colors hover:border-primary/50 hover:text-primary"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+
+          <button
+            type="button"
+            onClick={() => applyZoom(zoom + 0.5)}
+            disabled={zoom >= 4}
+            aria-label="Acercar imagen"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-control border border-white/15 bg-white/5 text-white transition-colors hover:border-primary/50 hover:text-primary disabled:opacity-35"
+          >
+            <ZoomIn className="h-4 w-4" />
+          </button>
+
+          {zoom > 1 && (
+            <button
+              type="button"
+              onClick={resetView}
+              aria-label="Restablecer vista"
+              className="inline-flex h-11 items-center gap-1.5 rounded-control border border-primary/35 bg-primary/15 px-3 text-xs font-medium text-primary transition-colors hover:bg-primary/25"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Ajustar</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 export const SpecimenImage = ({
   src,
   alt,
   scientificName,
+  title,
+  subtitle,
+  fit = 'contain',
+  zoomable = true,
+  showZoomHint = true,
   className = '',
 }: {
   src?: string;
   alt: string;
   scientificName: string;
+  title?: string;
+  subtitle?: string;
+  fit?: 'contain' | 'cover';
+  zoomable?: boolean;
+  showZoomHint?: boolean;
   className?: string;
 }) => {
   const [failed, setFailed] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setFailed(false);
   }, [src]);
 
@@ -165,20 +510,99 @@ export const SpecimenImage = ({
         aria-label={alt}
         className={`flex flex-col items-center justify-center bg-gradient-to-br from-surface-elevated via-surface to-background p-4 text-center ${className}`}
       >
-        <ImageOff className="h-8 w-8 text-muted/60 mb-2" />
+        <ImageOff className="mb-2 h-8 w-8 text-muted/60" />
         <span className="font-mono text-xs text-secondary">Imagen por URL</span>
-        <span className="mt-0.5 text-xs italic text-muted max-w-[90%] truncate">{scientificName || alt}</span>
+        <span className="mt-0.5 max-w-[90%] truncate text-xs italic text-muted">
+          {scientificName || alt}
+        </span>
       </div>
     );
   }
 
+  const handleOpenLightbox = (e: React.MouseEvent | React.KeyboardEvent) => {
+    if (!zoomable) return;
+    e.stopPropagation();
+    setLightboxOpen(true);
+  };
+
   return (
-    <img
-      src={src}
-      alt={alt}
-      referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
-      className={`object-cover ${className}`}
-    />
+    <>
+      <div
+        role={zoomable ? 'button' : undefined}
+        tabIndex={zoomable ? 0 : undefined}
+        aria-label={
+          zoomable ? `Ver imagen completa de ${title || alt} con detalle` : undefined
+        }
+        title={zoomable ? 'Tocar para ver imagen completa y con detalle' : undefined}
+        onClick={zoomable ? handleOpenLightbox : undefined}
+        onKeyDown={
+          zoomable
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleOpenLightbox(e);
+                }
+              }
+            : undefined
+        }
+        className={`group/specimen relative overflow-hidden bg-[#040D09] ${
+          zoomable
+            ? 'cursor-zoom-in focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary'
+            : ''
+        } ${className}`}
+      >
+        {fit === 'contain' && (
+          <>
+            <img
+              src={src}
+              alt=""
+              aria-hidden="true"
+              referrerPolicy="no-referrer"
+              className="pointer-events-none absolute inset-0 h-full w-full scale-110 select-none object-cover opacity-35 blur-xl saturate-125"
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/25 via-transparent to-black/35"
+            />
+          </>
+        )}
+
+        <img
+          src={src}
+          alt={alt}
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+          className={`relative z-[1] h-full w-full ${
+            fit === 'contain' ? 'object-contain' : 'object-cover'
+          } ${
+            zoomable
+              ? 'transition-transform duration-200 ease-out group-hover/specimen:scale-[1.02]'
+              : ''
+          }`}
+        />
+
+        {zoomable && showZoomHint && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-2.5 right-2.5 z-[2] inline-flex items-center gap-1.5 rounded-md border border-white/20 bg-[#04110B]/85 px-2 py-1 text-[11px] font-medium text-white/90 shadow-sm backdrop-blur-sm transition-colors group-hover/specimen:border-primary/60 group-hover/specimen:text-primary"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Ampliar</span>
+          </span>
+        )}
+      </div>
+
+      {zoomable && (
+        <ImageLightbox
+          open={lightboxOpen}
+          src={src}
+          alt={alt}
+          title={title || alt}
+          scientificName={scientificName}
+          subtitle={subtitle}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
+    </>
   );
 };

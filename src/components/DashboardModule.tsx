@@ -339,6 +339,9 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                     src={featuredSpecies.photoUrl}
                     alt={`${featuredSpecies.commonName} (${featuredSpecies.scientificName})`}
                     scientificName={featuredSpecies.scientificName}
+                    title={featuredSpecies.commonName}
+                    subtitle={`${featuredSpecies.catalogCode} · ${featuredSpecies.photoTag}`}
+                    showZoomHint={false}
                     className="h-full w-full"
                   />
                 </div>

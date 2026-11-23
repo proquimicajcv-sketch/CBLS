@@ -841,14 +841,16 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
                 <div className="divide-y divide-border">
             {/* Field Photograph & Header */}
             <div className="grid grid-cols-1 md:grid-cols-12">
-              <div className="relative aspect-[16/10] bg-background md:col-span-6 md:aspect-auto">
+              <div className="relative aspect-[4/3] bg-[#040D09] md:col-span-6 md:min-h-[300px] md:max-h-[430px] md:aspect-auto">
                 <SpecimenImage
                   src={activeSpecies.photoUrl}
                   alt={`${activeSpecies.commonName} — ${activeSpecies.photoTag}`}
                   scientificName={activeSpecies.scientificName}
+                  title={activeSpecies.commonName}
+                  subtitle={`${activeSpecies.catalogCode} · ${activeSchema.isPlant ? 'Diagnóstico' : 'Toma'}: ${activeSpecies.photoTag}`}
                   className="h-full w-full"
                 />
-                <div className="absolute bottom-3 left-3 bg-background/90 px-2.5 py-1 font-mono text-xs text-foreground">
+                <div className="pointer-events-none absolute bottom-3 left-3 z-[3] rounded bg-background/90 px-2.5 py-1 font-mono text-xs text-foreground">
                   {activeSchema.isPlant ? 'Diagnóstico' : 'Toma'}: {activeSpecies.photoTag}
                 </div>
               </div>
@@ -1174,10 +1176,13 @@ export const CatalogModule: React.FC<CatalogModuleProps> = ({
               </div>
               {activeSchema.isPlant && activeSpecies.macroPhotoUrl && (
                 <div className="pt-1">
-                  <img
+                  <SpecimenImage
                     src={activeSpecies.macroPhotoUrl}
                     alt={`Detalle macro / herbario de ${activeSpecies.commonName}`}
-                    className="max-h-44 rounded-lg border border-border object-cover"
+                    scientificName={activeSpecies.scientificName}
+                    title={activeSpecies.commonName}
+                    subtitle={`${activeSpecies.catalogCode} · Detalle macro / herbario`}
+                    className="h-52 w-full max-w-md rounded-lg border border-border"
                   />
                 </div>
               )}
@@ -2092,10 +2097,13 @@ const LocalSightingMediaPreview: React.FC<{ sighting: SightingEntry }> = ({
       {(photoSrc || videoSrc) && (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {photoSrc && (
-            <img
+            <SpecimenImage
               src={photoSrc}
               alt="Evidencia fotográfica del avistamiento"
-              className="h-28 w-full rounded-md border border-border object-cover"
+              scientificName={sighting.locality || 'Registro de campo'}
+              title="Evidencia fotográfica del avistamiento"
+              subtitle={`${sighting.observedDate} · ${sighting.observer}`}
+              className="h-44 w-full rounded-md border border-border"
             />
           )}
           {videoSrc && (

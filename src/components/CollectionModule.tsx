@@ -241,14 +241,16 @@ export const CollectionModule: React.FC<CollectionModuleProps> = ({
                 className="flex flex-col justify-between divide-y divide-border overflow-hidden"
               >
                 <div>
-                  <div className="relative aspect-[16/9] w-full border-b border-border bg-background">
+                  <div className="relative aspect-[4/3] w-full border-b border-border bg-[#040D09]">
                     <SpecimenImage
                       src={sp.photoUrl}
                       alt={sp.commonName}
                       scientificName={sp.scientificName}
+                      title={sp.commonName}
+                      subtitle={`${sp.catalogCode} · ${sp.photoTag}`}
                       className="h-full w-full"
                     />
-                    <span className="absolute left-2.5 top-2.5 rounded-full border border-primary/35 bg-[#04110B]/90 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-primary">
+                    <span className="pointer-events-none absolute left-2.5 top-2.5 z-[3] rounded-full border border-primary/35 bg-[#04110B]/90 px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-primary">
                       {sp.taxon === 'Plantas' ? 'Flora · Fijada' : 'Muestra · Fijada'}
                     </span>
                   </div>

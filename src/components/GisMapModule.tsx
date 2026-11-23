@@ -718,13 +718,15 @@ export const GisMapModule: React.FC<GisMapModuleProps> = ({
           {/* Selected Sighting Detail Panel */}
           {activeSighting ? (
             <Surface className="divide-y divide-border overflow-hidden">
-              <div className="aspect-[16/9] w-full bg-background">
+              <div className="aspect-[4/3] w-full bg-[#040D09]">
                 <SpecimenImage
                   src={activeSighting.photoUrl || activeSpecies?.photoUrl}
                   alt={activeSpecies?.commonName || 'Avistamiento'}
                   scientificName={
                     activeSpecies?.scientificName || 'Indeterminado'
                   }
+                  title={activeSpecies?.commonName || 'Avistamiento'}
+                  subtitle={`${activeSighting.locality} · ${activeSighting.observedDate}`}
                   className="h-full w-full"
                 />
               </div>
