@@ -72,8 +72,37 @@
         "occurrenceId": { "type": "string", "minLength": 1, "maxLength": 160 },
         "speciesId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "individualCount": { "type": "integer" },
-        "observationMethod": { "type": "string", "enum": ["En persona", "Cámara trampa", "Reporte de tercero"] },
+        "observationMethod": {
+          "type": "string",
+          "enum": [
+            "En persona",
+            "Bioacústica / Canto",
+            "Rastro indirecto",
+            "Cámara trampa",
+            "Reporte de tercero"
+          ]
+        },
         "sourceDetail": { "type": "string", "maxLength": 300 },
+        "vitalStatus": {
+          "type": "string",
+          "enum": ["Vivo", "Muerto / Atropellado", "Herido / Rescate", "Rastro sin individuo"]
+        },
+        "mortality": { "type": "object" },
+        "canton": {
+          "type": "string",
+          "enum": ["Tarrazú", "Dota", "León Cortés Castro", "Zona de amortiguamiento"]
+        },
+        "gpsAccuracyM": { "type": "integer" },
+        "idCertainty": {
+          "type": "string",
+          "enum": [
+            "Confirmada en campo",
+            "Requiere revisión curatorial",
+            "Solo género / familia"
+          ]
+        },
+        "demography": { "type": "string", "maxLength": 200 },
+        "behavior": { "type": "string", "maxLength": 300 },
         "observedDate": { "type": "string", "maxLength": 32 },
         "observedTime": { "type": "string", "maxLength": 16 },
         "observer": { "type": "string", "minLength": 1, "maxLength": 120 },
@@ -90,6 +119,7 @@
         "audioUrl": { "type": "string", "maxLength": 2000 },
         "localPhotoId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "localVideoId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "localAudioId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "localMediaSummary": { "type": "string", "maxLength": 300 },
         "synced": { "type": "boolean" },
         "createdAt": { "type": "string", "maxLength": 64 }

@@ -3,20 +3,27 @@ import {
   Camera,
   Compass,
   Eye,
+  Footprints,
   Headphones,
   ImagePlus,
   MapPin,
+  Mic,
   Search,
+  Square,
   Trash2,
   Users,
   Video,
+  Volume2,
   X,
 } from 'lucide-react';
 import type { SightingMediaInput } from '../hooks/useCblsStore';
 import type {
   HoldridgeZoneId,
+  SightingCanton,
   SightingEntry,
+  SightingIdCertainty,
   SightingObservationMethod,
+  SightingVitalStatus,
   SpeciesRecord,
   UserSession,
 } from '../types/cbls';
@@ -122,15 +129,45 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   const [weatherCondition, setWeatherCondition] =
     useState<SightingEntry['weatherCondition']>('Neblina montana');
 
-  // Local offline-captured Photo & Video files (saved as Blobs in IndexedDB)
+  // Extended CBLS field monitoring fields
+  const [vitalStatus, setVitalStatus] = useState<SightingVitalStatus>('Vivo');
+  const [mortalityCause, setMortalityCause] = useState<string>('Atropello vehicular');
+  const [mortalityRoadType, setMortalityRoadType] = useState<string>(
+    'Carretera asfaltada principal',
+  );
+  const [mortalitySiteAction, setMortalitySiteAction] = useState<string>(
+    'Retirado de la calzada',
+  );
+  const [canton, setCanton] = useState<SightingCanton>('Dota');
+  const [gpsAccuracyM, setGpsAccuracyM] = useState<string>('');
+  const [idCertainty, setIdCertainty] =
+    useState<SightingIdCertainty>('Confirmada en campo');
+  const [selectedDemography, setSelectedDemography] = useState<string[]>([]);
+  const [selectedBehavior, setSelectedBehavior] = useState<string[]>([]);
+
+  // Local offline-captured Photo, Video & Audio Blobs (saved in IndexedDB)
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioMimeType, setAudioMimeType] = useState<string>('audio/webm');
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
   const [existingLocalPhotoPreview, setExistingLocalPhotoPreview] = useState<string | null>(null);
   const [existingLocalVideoPreview, setExistingLocalVideoPreview] = useState<string | null>(null);
+  const [existingLocalAudioPreview, setExistingLocalAudioPreview] = useState<string | null>(null);
   const [removeExistingPhoto, setRemoveExistingPhoto] = useState<boolean>(false);
   const [removeExistingVideo, setRemoveExistingVideo] = useState<boolean>(false);
+  const [removeExistingAudio, setRemoveExistingAudio] = useState<boolean>(false);
+
+  // Offline MediaRecorder state
+  const [isRecordingAudio, setIsRecordingAudio] = useState<boolean>(false);
+  const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
+  const [audioRecorderStatus, setAudioRecorderStatus] = useState<string>('Listo para grabar');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
 
   // Optional Media URLs
   const [photoUrl, setPhotoUrl] = useState<string>('');
@@ -138,6 +175,29 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   const [audioUrl, setAudioUrl] = useState<string>('');
 
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
+
+  const stopActiveAudioRecording = (discard = false) => {
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      if (discard) {
+        recorder.onstop = null;
+      }
+      try {
+        recorder.stop();
+      } catch {
+        // ignore stop errors when already inactive
+      }
+    }
+    if (discard && audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((t) => t.stop());
+      audioStreamRef.current = null;
+    }
+    setIsRecordingAudio(false);
+  };
 
   const selectedSpecies = useMemo(
     () => speciesList.find((sp) => sp.id === speciesId) ?? null,
@@ -161,15 +221,27 @@ export const SightingModal: React.FC<SightingModalProps> = ({
   }, [speciesList, speciesSearch]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      stopActiveAudioRecording(true);
+      return;
+    }
 
+    stopActiveAudioRecording(true);
     setPhotoFile(null);
     setVideoFile(null);
+    setAudioBlob(null);
+    setAudioMimeType('audio/webm');
+    setRecordingSeconds(0);
+    setAudioRecorderStatus('Listo para grabar');
     setPhotoPreviewUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
     });
     setVideoPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setAudioPreviewUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return null;
     });
@@ -181,8 +253,13 @@ export const SightingModal: React.FC<SightingModalProps> = ({
       if (prev) URL.revokeObjectURL(prev);
       return null;
     });
+    setExistingLocalAudioPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
     setRemoveExistingPhoto(false);
     setRemoveExistingVideo(false);
+    setRemoveExistingAudio(false);
     setSpeciesSearch('');
     setGpsStatus(null);
 
@@ -191,6 +268,37 @@ export const SightingModal: React.FC<SightingModalProps> = ({
       setIndividualCount(editingSighting.individualCount);
       setObservationMethod(editingSighting.observationMethod || 'En persona');
       setSourceDetail(editingSighting.sourceDetail || '');
+      setVitalStatus(editingSighting.vitalStatus || 'Vivo');
+      setMortalityCause(editingSighting.mortality?.cause || 'Atropello vehicular');
+      setMortalityRoadType(
+        editingSighting.mortality?.roadType || 'Carretera asfaltada principal',
+      );
+      setMortalitySiteAction(
+        editingSighting.mortality?.siteAction || 'Retirado de la calzada',
+      );
+      setCanton(editingSighting.canton || 'Dota');
+      setGpsAccuracyM(
+        typeof editingSighting.gpsAccuracyM === 'number'
+          ? String(editingSighting.gpsAccuracyM)
+          : '',
+      );
+      setIdCertainty(editingSighting.idCertainty || 'Confirmada en campo');
+      setSelectedDemography(
+        editingSighting.demography
+          ? editingSighting.demography
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [],
+      );
+      setSelectedBehavior(
+        editingSighting.behavior
+          ? editingSighting.behavior
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [],
+      );
       setObserverName(editingSighting.observer || currentUser?.observerName || '');
       setObservedDate(editingSighting.observedDate);
       setObservedTime(editingSighting.observedTime);
@@ -224,6 +332,15 @@ export const SightingModal: React.FC<SightingModalProps> = ({
           setExistingLocalVideoPreview(u);
         });
       }
+      if (editingSighting.localAudioId) {
+        void idbGetMediaCapture(editingSighting.localAudioId).then((cap) => {
+          if (!active || !cap) return;
+          const u = URL.createObjectURL(cap.blob);
+          toRevoke.push(u);
+          setExistingLocalAudioPreview(u);
+          setAudioRecorderStatus('Audio local guardado en el dispositivo');
+        });
+      }
       return () => {
         active = false;
         toRevoke.forEach((u) => URL.revokeObjectURL(u));
@@ -236,6 +353,15 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     setObservedTime(now.toTimeString().slice(0, 5));
     setObservationMethod('En persona');
     setSourceDetail('');
+    setVitalStatus('Vivo');
+    setMortalityCause('Atropello vehicular');
+    setMortalityRoadType('Carretera asfaltada principal');
+    setMortalitySiteAction('Retirado de la calzada');
+    setCanton('Dota');
+    setGpsAccuracyM('');
+    setIdCertainty('Confirmada en campo');
+    setSelectedDemography([]);
+    setSelectedBehavior([]);
     setObserverName(currentUser?.observerName || '');
     setMicrohabitat('Sotobosque húmedo sobre vegetación epífita');
     setWeatherCondition('Neblina montana');
@@ -261,10 +387,12 @@ export const SightingModal: React.FC<SightingModalProps> = ({
 
   useEffect(() => {
     return () => {
+      stopActiveAudioRecording(true);
       if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
       if (videoPreviewUrl) URL.revokeObjectURL(videoPreviewUrl);
+      if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
     };
-  }, [photoPreviewUrl, videoPreviewUrl]);
+  }, [photoPreviewUrl, videoPreviewUrl, audioPreviewUrl]);
 
   useEffect(() => {
     if (!open) return;
@@ -295,6 +423,81 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     e.target.value = '';
   };
 
+  const handleStartAudioRecording = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setAudioRecorderStatus('Tu navegador no soporta grabación de micrófono');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const preferredMime =
+        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')
+            ? 'audio/mp4'
+            : '';
+
+      const recorder = preferredMime
+        ? new MediaRecorder(stream, { mimeType: preferredMime })
+        : new MediaRecorder(stream);
+
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) {
+          audioChunksRef.current.push(ev.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        if (recordingTimerRef.current !== null) {
+          window.clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        const mime = recorder.mimeType || preferredMime || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type: mime });
+        setAudioBlob(blob);
+        setAudioMimeType(mime);
+        setRemoveExistingAudio(false);
+        setAudioPreviewUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(blob);
+        });
+        setAudioRecorderStatus(`Audio capturado listo para guardar (${formatSize(blob.size)})`);
+        setIsRecordingAudio(false);
+        stream.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
+      };
+
+      recorder.start();
+      setIsRecordingAudio(true);
+      setRecordingSeconds(0);
+      setAudioRecorderStatus('Grabando sonido ambiente / canto...');
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds((sec) => sec + 1);
+      }, 1000);
+    } catch {
+      setAudioRecorderStatus('Sin acceso al micrófono');
+      setIsRecordingAudio(false);
+    }
+  };
+
+  const handleStopAudioRecording = () => {
+    stopActiveAudioRecording(false);
+  };
+
+  const toggleMultiOption = (
+    value: string,
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => {
+    setter((prev) =>
+      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value],
+    );
+  };
+
   const handleCaptureGps = () => {
     setGpsStatus('Consultando satélites WGS84 (funciona sin señal celular)...');
     if ('geolocation' in navigator) {
@@ -305,12 +508,23 @@ export const SightingModal: React.FC<SightingModalProps> = ({
           const alt = pos.coords.altitude
             ? Math.round(pos.coords.altitude)
             : estimateCblsElevationFromCoords(lat, lon);
+          const acc =
+            typeof pos.coords.accuracy === 'number' && Number.isFinite(pos.coords.accuracy)
+              ? Math.max(1, Math.min(5000, Math.round(pos.coords.accuracy)))
+              : null;
           const zone = detectHoldridgeZoneByElevation(alt);
           setLatitude(lat);
           setLongitude(lon);
           setElevationM(alt);
           setHoldridgeZone(zone);
-          setGpsStatus(`Posición exacta: ${lat.toFixed(6)}° N, ${lon.toFixed(6)}° W · ${alt} m s.n.m.`);
+          if (acc !== null) {
+            setGpsAccuracyM(String(acc));
+          }
+          setGpsStatus(
+            `Posición exacta: ${lat.toFixed(6)}° N, ${lon.toFixed(6)}° W · ${alt} m s.n.m.${
+              acc !== null ? ` (±${acc} m)` : ''
+            }`,
+          );
         },
         () => {
           const lat = 9.5512;
@@ -337,6 +551,9 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     setHoldridgeZone(detectHoldridgeZoneByElevation(nextAlt));
   };
 
+  const isMortalityAlert =
+    vitalStatus === 'Muerto / Atropellado' || vitalStatus === 'Herido / Rescate';
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
@@ -349,9 +566,19 @@ export const SightingModal: React.FC<SightingModalProps> = ({
     }
     if (!speciesId) return;
 
+    if (isRecordingAudio) {
+      stopActiveAudioRecording(true);
+    }
+
     const effectiveObserver = isEditing
       ? observerName.trim() || editingSighting?.observer || currentUser.observerName
       : currentUser.observerName;
+
+    const parsedAccuracy = Number(gpsAccuracyM);
+    const validAccuracy =
+      gpsAccuracyM.trim() !== '' && Number.isFinite(parsedAccuracy) && parsedAccuracy >= 1
+        ? Math.min(5000, Math.round(parsedAccuracy))
+        : undefined;
 
     void onSave(
       {
@@ -359,6 +586,20 @@ export const SightingModal: React.FC<SightingModalProps> = ({
         individualCount,
         observationMethod,
         sourceDetail: sourceDetail.trim() || undefined,
+        vitalStatus,
+        mortality: isMortalityAlert
+          ? {
+              cause: mortalityCause,
+              roadType: mortalityRoadType,
+              siteAction: mortalitySiteAction,
+            }
+          : undefined,
+        canton,
+        gpsAccuracyM: validAccuracy,
+        idCertainty,
+        demography:
+          selectedDemography.length > 0 ? selectedDemography.join(', ') : undefined,
+        behavior: selectedBehavior.length > 0 ? selectedBehavior.join(', ') : undefined,
         observedDate,
         observedTime,
         observer: effectiveObserver,
@@ -377,8 +618,11 @@ export const SightingModal: React.FC<SightingModalProps> = ({
       {
         photoFile,
         videoFile,
+        audioBlob,
+        audioMimeType,
         removeExistingPhoto,
         removeExistingVideo,
+        removeExistingAudio,
       },
     );
     onClose();
@@ -474,23 +718,35 @@ export const SightingModal: React.FC<SightingModalProps> = ({
               </select>
             </Field>
 
-            {/* Observation / Detection Method Selector */}
-            <div className="space-y-2.5 sm:col-span-2">
-              <span className="block text-xs font-medium text-foreground">
+            {/* 1. DETECCIÓN AMPLIADA (Incluye Bioacústica y Rastro indirecto) */}
+            <div className="space-y-3 sm:col-span-2">
+              <span className="block text-sm font-medium text-emerald-100/90">
                 Forma de avistamiento / detección
               </span>
               <div
                 role="radiogroup"
                 aria-label="Forma de avistamiento"
-                className="grid grid-cols-1 gap-2 sm:grid-cols-3"
+                className="grid grid-cols-2 gap-2 sm:grid-cols-5"
               >
                 {(
                   [
                     {
                       id: 'En persona' as const,
                       label: 'En persona',
-                      desc: 'Avistamiento directo',
+                      desc: 'Visual directo',
                       icon: Eye,
+                    },
+                    {
+                      id: 'Bioacústica / Canto' as const,
+                      label: 'Bioacústica',
+                      desc: 'Canto o llamado',
+                      icon: Volume2,
+                    },
+                    {
+                      id: 'Rastro indirecto' as const,
+                      label: 'Rastro',
+                      desc: 'Huella, excreta, muda',
+                      icon: Footprints,
                     },
                     {
                       id: 'Cámara trampa' as const,
@@ -501,7 +757,7 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                     {
                       id: 'Reporte de tercero' as const,
                       label: 'Reporte externo',
-                      desc: 'Alguien dijo haberlo visto',
+                      desc: 'Terceros / vecino',
                       icon: Users,
                     },
                   ] as const
@@ -514,29 +770,34 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                       type="button"
                       role="radio"
                       aria-checked={active}
-                      onClick={() => setObservationMethod(opt.id)}
-                      className={`flex items-center gap-2.5 rounded-control border px-3 py-2.5 text-left transition-colors ${
+                      onClick={() => {
+                        setObservationMethod(opt.id);
+                        if (opt.id === 'Rastro indirecto' && vitalStatus === 'Vivo') {
+                          setVitalStatus('Rastro sin individuo');
+                        }
+                      }}
+                      className={`flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition ${
                         active
-                          ? 'border-primary bg-primary/15 text-foreground'
-                          : 'border-border bg-input text-muted hover:border-foreground/30 hover:text-foreground'
+                          ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100'
+                          : 'border-emerald-800/70 bg-[#0b1f18] text-emerald-100/85 hover:border-emerald-600/60'
                       }`}
                     >
-                      <span
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
-                          active
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-background text-muted'
-                        }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-xs font-semibold text-foreground">
+                      <span className="flex items-center gap-1.5">
+                        <Icon
+                          className={`h-3.5 w-3.5 shrink-0 ${
+                            active ? 'text-emerald-300' : 'text-emerald-400/70'
+                          }`}
+                        />
+                        <span
+                          className={`text-xs font-semibold ${
+                            active ? 'text-emerald-200' : 'text-emerald-100'
+                          }`}
+                        >
                           {opt.label}
                         </span>
-                        <span className="block truncate text-[11px] text-muted">
-                          {opt.desc}
-                        </span>
+                      </span>
+                      <span className="text-[11px] leading-tight text-emerald-100/60">
+                        {opt.desc}
                       </span>
                     </button>
                   );
@@ -544,12 +805,15 @@ export const SightingModal: React.FC<SightingModalProps> = ({
               </div>
 
               {(observationMethod === 'Cámara trampa' ||
-                observationMethod === 'Reporte de tercero') && (
+                observationMethod === 'Reporte de tercero' ||
+                observationMethod === 'Rastro indirecto') && (
                 <Field
                   label={
                     observationMethod === 'Cámara trampa'
                       ? 'Código o estación de cámara trampa (opcional)'
-                      : 'Persona o fuente que reportó el avistamiento (opcional)'
+                      : observationMethod === 'Rastro indirecto'
+                        ? 'Tipo de rastro o indicio observado (opcional)'
+                        : 'Persona o fuente que reportó el avistamiento (opcional)'
                   }
                   htmlFor="obs-source-detail"
                 >
@@ -559,7 +823,9 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                     placeholder={
                       observationMethod === 'Cámara trampa'
                         ? 'Ej. Cámara Trampa CT-04 · Paso del Río'
-                        : 'Ej. Vecino de la finca / Guía local'
+                        : observationMethod === 'Rastro indirecto'
+                          ? 'Ej. Huellas frescas en barro, excreta, plumas o muda de piel'
+                          : 'Ej. Vecino de la finca / Guía local'
                     }
                     value={sourceDetail}
                     onChange={(e) => setSourceDetail(e.target.value)}
@@ -567,6 +833,301 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                   />
                 </Field>
               )}
+            </div>
+
+            {/* 2. ESTADO VITAL DEL INDIVIDUO + PANEL CONDICIONAL DE ATROPELLO / MORTALIDAD */}
+            <div className="space-y-3 rounded-xl border border-emerald-800/60 bg-[#091a14] p-3.5 sm:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium text-emerald-100/90">
+                  Condición / Estado vital del espécimen
+                </span>
+                <span className="text-[11px] text-emerald-300/70">
+                  Monitoreo vial y amenazas
+                </span>
+              </div>
+
+              <div
+                role="radiogroup"
+                aria-label="Condición o estado vital del espécimen"
+                className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+              >
+                {(
+                  [
+                    { id: 'Vivo' as const, label: 'Vivo / Activo', tone: 'emerald' as const },
+                    {
+                      id: 'Muerto / Atropellado' as const,
+                      label: 'Muerto / Atropello',
+                      tone: 'rose' as const,
+                    },
+                    {
+                      id: 'Herido / Rescate' as const,
+                      label: 'Herido / Rescate',
+                      tone: 'amber' as const,
+                    },
+                    {
+                      id: 'Rastro sin individuo' as const,
+                      label: 'Solo rastro',
+                      tone: 'emerald' as const,
+                    },
+                  ] as const
+                ).map((opt) => {
+                  const active = vitalStatus === opt.id;
+                  const activeClass =
+                    opt.tone === 'rose'
+                      ? 'border-rose-400 bg-rose-500/20 text-rose-100'
+                      : opt.tone === 'amber'
+                        ? 'border-amber-400 bg-amber-500/20 text-amber-100'
+                        : 'border-emerald-400 bg-emerald-500/20 text-emerald-200';
+                  const hoverClass =
+                    opt.tone === 'rose'
+                      ? 'hover:border-rose-400/60'
+                      : opt.tone === 'amber'
+                        ? 'hover:border-amber-400/60'
+                        : 'hover:border-emerald-500/60';
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setVitalStatus(opt.id)}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                        active
+                          ? activeClass
+                          : `border-emerald-800/70 bg-[#0b1f18] text-emerald-100/80 ${hoverClass}`
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {isMortalityAlert && (
+                <div className="grid grid-cols-1 gap-3 border-t border-rose-500/25 pt-3 sm:grid-cols-3">
+                  <div>
+                    <label
+                      htmlFor="obs-mortality-cause"
+                      className="mb-1 block text-xs text-rose-200/90"
+                    >
+                      Causa probable
+                    </label>
+                    <select
+                      id="obs-mortality-cause"
+                      value={mortalityCause}
+                      onChange={(e) => setMortalityCause(e.target.value)}
+                      className="w-full rounded-lg border border-rose-500/30 bg-[#0d221b] px-3 py-2 text-xs text-emerald-50 focus:border-rose-400 focus:outline-none"
+                    >
+                      <option value="Atropello vehicular">Atropello vehicular</option>
+                      <option value="Persecución humana">
+                        Persecución / matanza (ej. serpientes)
+                      </option>
+                      <option value="Depredación animal doméstico">
+                        Ataque perro / gato doméstico
+                      </option>
+                      <option value="Electrocución / tendido">
+                        Electrocución / cableado
+                      </option>
+                      <option value="Colisión infraestructura">
+                        Choque contra ventana / malla
+                      </option>
+                      <option value="Depredación natural">Depredación natural</option>
+                      <option value="Causa desconocida">Causa desconocida</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="obs-mortality-road"
+                      className="mb-1 block text-xs text-rose-200/90"
+                    >
+                      Tipo de vía / entorno
+                    </label>
+                    <select
+                      id="obs-mortality-road"
+                      value={mortalityRoadType}
+                      onChange={(e) => setMortalityRoadType(e.target.value)}
+                      className="w-full rounded-lg border border-rose-500/30 bg-[#0d221b] px-3 py-2 text-xs text-emerald-50 focus:border-rose-400 focus:outline-none"
+                    >
+                      <option value="Carretera asfaltada principal">
+                        Carretera asfaltada (Ruta Nacional)
+                      </option>
+                      <option value="Calle cantonal / lastre">
+                        Calle cantonal / lastre
+                      </option>
+                      <option value="Camino interno de finca">
+                        Camino interno de finca / cafetal
+                      </option>
+                      <option value="Cruce de quebrada / puente">
+                        Cruce de quebrada / alcantarilla
+                      </option>
+                      <option value="Sendero / bosque">
+                        Sendero / interior de bosque
+                      </option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="obs-mortality-action"
+                      className="mb-1 block text-xs text-rose-200/90"
+                    >
+                      Acción en sitio
+                    </label>
+                    <select
+                      id="obs-mortality-action"
+                      value={mortalitySiteAction}
+                      onChange={(e) => setMortalitySiteAction(e.target.value)}
+                      className="w-full rounded-lg border border-rose-500/30 bg-[#0d221b] px-3 py-2 text-xs text-emerald-50 focus:border-rose-400 focus:outline-none"
+                    >
+                      <option value="Retirado de la calzada">
+                        Retirado de la calzada (evitar carroñeros)
+                      </option>
+                      <option value="Dejado in situ">Dejado in situ (solo registro)</option>
+                      <option value="Reportado a SINAC / 911">
+                        Reportado a SINAC / Bomberos / 9-1-1
+                      </option>
+                      <option value="Traslado a centro de rescate">
+                        Trasladado a centro de rescate
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. CANTÓN CBLS + PRECISIÓN GPS + CERTEZA TAXONÓMICA */}
+            <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3">
+              <div>
+                <label
+                  htmlFor="obs-canton"
+                  className="mb-1 block text-xs font-medium text-emerald-100/90"
+                >
+                  Cantón Zona de los Santos
+                </label>
+                <select
+                  id="obs-canton"
+                  value={canton}
+                  onChange={(e) => setCanton(e.target.value as SightingCanton)}
+                  className="w-full rounded-xl border border-emerald-800/70 bg-[#0b1f18] px-3 py-2.5 text-sm text-emerald-50 focus:border-emerald-400 focus:outline-none"
+                >
+                  <option value="Tarrazú">Tarrazú</option>
+                  <option value="Dota">Dota</option>
+                  <option value="León Cortés Castro">León Cortés Castro</option>
+                  <option value="Zona de amortiguamiento">
+                    Zona de amortiguamiento / límite
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="obs-gps-accuracy"
+                  className="mb-1 block text-xs font-medium text-emerald-100/90"
+                >
+                  Precisión GPS (± metros)
+                </label>
+                <div className="flex items-center rounded-xl border border-emerald-800/70 bg-[#0b1f18] px-3 py-2.5 focus-within:border-emerald-400">
+                  <span className="mr-1.5 text-xs text-emerald-300/70">±</span>
+                  <input
+                    id="obs-gps-accuracy"
+                    type="number"
+                    placeholder="8"
+                    min={1}
+                    max={5000}
+                    value={gpsAccuracyM}
+                    onChange={(e) => setGpsAccuracyM(e.target.value)}
+                    className="w-full bg-transparent font-mono text-sm text-emerald-50 focus:outline-none"
+                  />
+                  <span className="ml-1 text-xs text-emerald-300/70">m</span>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="obs-id-certainty"
+                  className="mb-1 block text-xs font-medium text-emerald-100/90"
+                >
+                  Nivel de certeza ID
+                </label>
+                <select
+                  id="obs-id-certainty"
+                  value={idCertainty}
+                  onChange={(e) =>
+                    setIdCertainty(e.target.value as SightingIdCertainty)
+                  }
+                  className="w-full rounded-xl border border-emerald-800/70 bg-[#0b1f18] px-3 py-2.5 text-sm text-emerald-50 focus:border-emerald-400 focus:outline-none"
+                >
+                  <option value="Confirmada en campo">Confirmada en campo</option>
+                  <option value="Requiere revisión curatorial">
+                    Requiere revisión curatorial
+                  </option>
+                  <option value="Solo género / familia">Solo género o familia</option>
+                </select>
+              </div>
+            </div>
+
+            {/* 4. DEMOGRAFÍA Y CONDUCTA (CHIPS DE SELECCIÓN MÚLTIPLE RÁPIDA) */}
+            <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-2">
+              <div>
+                <span className="mb-1.5 block text-xs font-medium text-emerald-100/90">
+                  Edad y sexo (opcional)
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(['Adulto', 'Juvenil / Cría', 'Macho', 'Hembra'] as const).map((item) => {
+                    const active = selectedDemography.includes(item);
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => toggleMultiOption(item, setSelectedDemography)}
+                        className={`rounded-lg border px-2.5 py-1 text-xs transition ${
+                          active
+                            ? 'border-emerald-400 bg-emerald-500/20 font-medium text-emerald-200'
+                            : 'border-emerald-800/70 bg-[#0b1f18] text-emerald-100/80 hover:border-emerald-600/60'
+                        }`}
+                      >
+                        {item}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <span className="mb-1.5 block text-xs font-medium text-emerald-100/90">
+                  Actividad / Conducta observada
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { val: 'Forrajeando', label: 'Forrajeando' },
+                      { val: 'Vocalizando', label: 'Vocalizando' },
+                      { val: 'En reposo / Percha', label: 'En reposo' },
+                      { val: 'Cruzando vía', label: 'Cruzando vía' },
+                      { val: 'Anidando / Crías', label: 'Anidando / Crías' },
+                    ] as const
+                  ).map((item) => {
+                    const active = selectedBehavior.includes(item.val);
+                    return (
+                      <button
+                        key={item.val}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => toggleMultiOption(item.val, setSelectedBehavior)}
+                        className={`rounded-lg border px-2.5 py-1 text-xs transition ${
+                          active
+                            ? 'border-emerald-400 bg-emerald-500/20 font-medium text-emerald-200'
+                            : 'border-emerald-800/70 bg-[#0b1f18] text-emerald-100/80 hover:border-emerald-600/60'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
             <Field
@@ -824,6 +1385,73 @@ export const SightingModal: React.FC<SightingModalProps> = ({
                       </p>
                     </div>
                   )
+                )}
+              </div>
+            </div>
+
+            {/* 5. GRABADORA DE AUDIO BIOACÚSTICO OFFLINE EN CAMPO */}
+            <div className="rounded-xl border border-emerald-800/60 bg-[#091a14] p-3.5">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-100">
+                  <Mic
+                    className={`h-3.5 w-3.5 ${
+                      isRecordingAudio ? 'animate-pulse text-rose-400' : 'text-emerald-300'
+                    }`}
+                  />
+                  Audio / Canto en campo (Offline)
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] text-emerald-300/80">
+                    {isRecordingAudio
+                      ? `Grabando ${String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:${String(recordingSeconds % 60).padStart(2, '0')}`
+                      : audioRecorderStatus}
+                  </span>
+                  {(audioBlob || (existingLocalAudioPreview && !removeExistingAudio)) &&
+                    !isRecordingAudio && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
+                          setAudioBlob(null);
+                          setAudioPreviewUrl(null);
+                          if (existingLocalAudioPreview) {
+                            setRemoveExistingAudio(true);
+                          }
+                          setAudioRecorderStatus('Listo para grabar');
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] text-coral hover:underline"
+                      >
+                        <Trash2 className="h-3 w-3" /> Quitar
+                      </button>
+                    )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleStartAudioRecording()}
+                  disabled={isRecordingAudio}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/20 px-3 py-2 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/30 disabled:opacity-40"
+                >
+                  <span className="h-2 w-2 rounded-full bg-emerald-300" />
+                  Grabar canto / llamado
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStopAudioRecording}
+                  disabled={!isRecordingAudio}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/20 px-3 py-2 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/30 disabled:opacity-40"
+                >
+                  <Square className="h-3 w-3 fill-current" />
+                  Detener
+                </button>
+                {(audioPreviewUrl || (existingLocalAudioPreview && !removeExistingAudio)) && (
+                  <audio
+                    src={audioPreviewUrl || existingLocalAudioPreview || undefined}
+                    controls
+                    className="h-8 max-w-full flex-1 min-w-[200px]"
+                  />
                 )}
               </div>
             </div>

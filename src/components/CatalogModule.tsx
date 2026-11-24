@@ -2108,6 +2108,7 @@ const LocalSightingMediaPreview: React.FC<{ sighting: SightingEntry }> = ({
 }) => {
   const [photoSrc, setPhotoSrc] = useState<string | null>(sighting.photoUrl || null);
   const [videoSrc, setVideoSrc] = useState<string | null>(sighting.videoUrl || null);
+  const [audioSrc, setAudioSrc] = useState<string | null>(sighting.audioUrl || null);
 
   useEffect(() => {
     let active = true;
@@ -2115,6 +2116,7 @@ const LocalSightingMediaPreview: React.FC<{ sighting: SightingEntry }> = ({
 
     setPhotoSrc(sighting.photoUrl || null);
     setVideoSrc(sighting.videoUrl || null);
+    setAudioSrc(sighting.audioUrl || null);
 
     if (sighting.localPhotoId && !sighting.photoUrl) {
       void idbGetMediaCapture(sighting.localPhotoId).then((cap) => {
@@ -2132,6 +2134,14 @@ const LocalSightingMediaPreview: React.FC<{ sighting: SightingEntry }> = ({
         setVideoSrc(objUrl);
       });
     }
+    if (sighting.localAudioId && !sighting.audioUrl) {
+      void idbGetMediaCapture(sighting.localAudioId).then((cap) => {
+        if (!active || !cap) return;
+        const objUrl = URL.createObjectURL(cap.blob);
+        urlsToRevoke.push(objUrl);
+        setAudioSrc(objUrl);
+      });
+    }
 
     return () => {
       active = false;
@@ -2141,16 +2151,77 @@ const LocalSightingMediaPreview: React.FC<{ sighting: SightingEntry }> = ({
     sighting.id,
     sighting.photoUrl,
     sighting.videoUrl,
+    sighting.audioUrl,
     sighting.localPhotoId,
     sighting.localVideoId,
+    sighting.localAudioId,
   ]);
 
-  if (!photoSrc && !videoSrc && !sighting.localMediaSummary) {
+  const hasExtendedMeta = Boolean(
+    sighting.vitalStatus ||
+      sighting.canton ||
+      sighting.gpsAccuracyM ||
+      sighting.idCertainty ||
+      sighting.demography ||
+      sighting.behavior,
+  );
+
+  if (!photoSrc && !videoSrc && !audioSrc && !sighting.localMediaSummary && !hasExtendedMeta) {
     return null;
   }
 
+  const isMortality =
+    sighting.vitalStatus === 'Muerto / Atropellado' ||
+    sighting.vitalStatus === 'Herido / Rescate';
+
   return (
     <div className="space-y-2 pt-1">
+      {hasExtendedMeta && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+          {sighting.vitalStatus && (
+            <span
+              className={`rounded border px-1.5 py-0.5 font-medium ${
+                isMortality
+                  ? 'border-rose-400/50 bg-rose-500/15 text-rose-200'
+                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+              }`}
+            >
+              {sighting.vitalStatus}
+            </span>
+          )}
+          {sighting.canton && (
+            <span className="rounded border border-border bg-background/70 px-1.5 py-0.5 text-foreground/85">
+              {sighting.canton}
+            </span>
+          )}
+          {typeof sighting.gpsAccuracyM === 'number' && (
+            <span className="rounded border border-border bg-background/70 px-1.5 py-0.5 font-mono text-muted">
+              ±{sighting.gpsAccuracyM} m
+            </span>
+          )}
+          {sighting.idCertainty && (
+            <span className="rounded border border-border bg-background/70 px-1.5 py-0.5 text-muted">
+              {sighting.idCertainty}
+            </span>
+          )}
+          {sighting.demography && (
+            <span className="rounded border border-border bg-background/70 px-1.5 py-0.5 text-foreground/80">
+              {sighting.demography}
+            </span>
+          )}
+          {sighting.behavior && (
+            <span className="rounded border border-border bg-background/70 px-1.5 py-0.5 text-foreground/80">
+              {sighting.behavior}
+            </span>
+          )}
+        </div>
+      )}
+      {isMortality && sighting.mortality && (
+        <p className="rounded border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-100/90">
+          <strong>Monitoreo vial / amenaza:</strong> {sighting.mortality.cause} ·{' '}
+          {sighting.mortality.roadType} · {sighting.mortality.siteAction}
+        </p>
+      )}
       {sighting.localMediaSummary && (
         <p className="font-mono text-[11px] text-secondary">
           Evidencia capturada: {sighting.localMediaSummary}
@@ -2175,6 +2246,14 @@ const LocalSightingMediaPreview: React.FC<{ sighting: SightingEntry }> = ({
               className="h-28 w-full rounded-md border border-border bg-black object-cover"
             />
           )}
+        </div>
+      )}
+      {audioSrc && (
+        <div className="rounded-md border border-emerald-500/25 bg-[#091a14] px-2.5 py-2">
+          <p className="mb-1 text-[11px] font-medium text-emerald-200">
+            Registro bioacústico / canto capturado
+          </p>
+          <audio src={audioSrc} controls className="h-8 w-full" />
         </div>
       )}
     </div>

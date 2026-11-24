@@ -1,6 +1,6 @@
 {
   "name": "Bitácora CBLS — Monitoreo Biológico Los Santos",
   "description": "Plataforma de campo autónoma para el inventario biológico, georreferenciación SIG por zonas de vida Holdridge y auditoría Darwin Core en el Corredor Biológico Los Santos.",
-  "requestFramePermissions": ["geolocation"],
+  "requestFramePermissions": ["geolocation", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

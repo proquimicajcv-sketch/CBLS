@@ -667,6 +667,23 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                             <span className="rounded border border-primary/25 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-primary">
                               {obs.observationMethod || 'En persona'}
                             </span>
+                            {obs.vitalStatus && obs.vitalStatus !== 'Vivo' && (
+                              <span
+                                className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-medium ${
+                                  obs.vitalStatus === 'Muerto / Atropellado' ||
+                                  obs.vitalStatus === 'Herido / Rescate'
+                                    ? 'border-rose-400/50 bg-rose-500/15 text-rose-200'
+                                    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                                }`}
+                              >
+                                {obs.vitalStatus}
+                              </span>
+                            )}
+                            {obs.canton && (
+                              <span className="rounded border border-border bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-foreground/85">
+                                {obs.canton}
+                              </span>
+                            )}
                             {obs.synced ? (
                               <span className="rounded border border-secondary/30 bg-secondary/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-secondary">
                                 Sincronizado Firebase
@@ -688,7 +705,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                             {(obs.videoUrl || obs.localVideoId) && (
                               <Video className="h-3 w-3 text-primary" />
                             )}
-                            {obs.audioUrl && (
+                            {(obs.audioUrl || obs.localAudioId) && (
                               <Volume2 className="h-3 w-3 text-coral" />
                             )}
                             {obs.localMediaSummary && (
@@ -699,6 +716,7 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
                           </div>
                           <p className="mt-1 font-mono text-[11px] text-muted">
                             GPS: {obs.latitude.toFixed(5)}°, {obs.longitude.toFixed(5)}° · {obs.elevationM} m
+                            {typeof obs.gpsAccuracyM === 'number' ? ` (±${obs.gpsAccuracyM} m)` : ''}
                           </p>
                           {obs.notes && (
                             <p className="mt-1 line-clamp-2 text-xs text-foreground/80">

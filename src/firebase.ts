@@ -231,12 +231,66 @@ export function toFirestoreSightingPayload(raw: SightingEntry): SightingEntry {
 
   if (
     raw.observationMethod &&
-    ['En persona', 'Cámara trampa', 'Reporte de tercero'].includes(raw.observationMethod)
+    [
+      'En persona',
+      'Bioacústica / Canto',
+      'Rastro indirecto',
+      'Cámara trampa',
+      'Reporte de tercero',
+    ].includes(raw.observationMethod)
   ) {
     payload.observationMethod = raw.observationMethod;
   }
   if (typeof raw.sourceDetail === 'string' && raw.sourceDetail.trim()) {
     payload.sourceDetail = raw.sourceDetail.trim().slice(0, 300);
+  }
+  if (
+    raw.vitalStatus &&
+    ['Vivo', 'Muerto / Atropellado', 'Herido / Rescate', 'Rastro sin individuo'].includes(
+      raw.vitalStatus,
+    )
+  ) {
+    payload.vitalStatus = raw.vitalStatus;
+  }
+  const isMortalityStatus =
+    payload.vitalStatus === 'Muerto / Atropellado' ||
+    payload.vitalStatus === 'Herido / Rescate';
+  if (isMortalityStatus && raw.mortality) {
+    const cause = String(raw.mortality.cause || '').trim().slice(0, 160);
+    const roadType = String(raw.mortality.roadType || '').trim().slice(0, 160);
+    const siteAction = String(raw.mortality.siteAction || '').trim().slice(0, 160);
+    if (cause && roadType && siteAction) {
+      payload.mortality = { cause, roadType, siteAction };
+    }
+  }
+  if (
+    raw.canton &&
+    ['Tarrazú', 'Dota', 'León Cortés Castro', 'Zona de amortiguamiento'].includes(raw.canton)
+  ) {
+    payload.canton = raw.canton;
+  }
+  if (
+    typeof raw.gpsAccuracyM === 'number' &&
+    Number.isFinite(raw.gpsAccuracyM) &&
+    raw.gpsAccuracyM >= 1
+  ) {
+    payload.gpsAccuracyM = Math.max(1, Math.min(5000, Math.round(raw.gpsAccuracyM)));
+  }
+  if (
+    raw.idCertainty &&
+    [
+      'Confirmada en campo',
+      'Requiere revisión curatorial',
+      'Solo género / familia',
+    ].includes(raw.idCertainty)
+  ) {
+    payload.idCertainty = raw.idCertainty;
+  }
+  if (typeof raw.demography === 'string' && raw.demography.trim()) {
+    payload.demography = raw.demography.trim().slice(0, 200);
+  }
+  if (typeof raw.behavior === 'string' && raw.behavior.trim()) {
+    payload.behavior = raw.behavior.trim().slice(0, 300);
   }
   if (typeof raw.notes === 'string' && raw.notes.trim()) {
     payload.notes = raw.notes.trim().slice(0, 2000);
@@ -255,6 +309,9 @@ export function toFirestoreSightingPayload(raw: SightingEntry): SightingEntry {
   }
   if (typeof raw.localVideoId === 'string' && raw.localVideoId.trim()) {
     payload.localVideoId = sanitizeFirestoreId(raw.localVideoId, 'vid');
+  }
+  if (typeof raw.localAudioId === 'string' && raw.localAudioId.trim()) {
+    payload.localAudioId = sanitizeFirestoreId(raw.localAudioId, 'aud');
   }
   if (typeof raw.localMediaSummary === 'string' && raw.localMediaSummary.trim()) {
     payload.localMediaSummary = raw.localMediaSummary.trim().slice(0, 300);

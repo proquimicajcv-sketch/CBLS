@@ -65,8 +65,11 @@ const CLOUD_MIGRATED_KEY = 'cbls_firestore_migrated_v1';
 export interface SightingMediaInput {
   photoFile?: File | null;
   videoFile?: File | null;
+  audioBlob?: Blob | null;
+  audioMimeType?: string;
   removeExistingPhoto?: boolean;
   removeExistingVideo?: boolean;
+  removeExistingAudio?: boolean;
 }
 
 function mergePendingSpecies(
@@ -346,8 +349,9 @@ export function useCblsStore() {
                 const rawSi = item.payload as SightingEntry;
                 let nextPhotoUrl = rawSi.photoUrl;
                 let nextVideoUrl = rawSi.videoUrl;
+                let nextAudioUrl = rawSi.audioUrl;
 
-                // Try uploading offline-captured photo/video Blobs to Firebase Storage if available
+                // Try uploading offline-captured photo/video/audio Blobs to Firebase Storage if available
                 if (rawSi.localPhotoId && !nextPhotoUrl) {
                   const cap = await idbGetMediaCapture(rawSi.localPhotoId);
                   if (cap) {
@@ -368,11 +372,22 @@ export function useCblsStore() {
                     }
                   }
                 }
+                if (rawSi.localAudioId && !nextAudioUrl) {
+                  const cap = await idbGetMediaCapture(rawSi.localAudioId);
+                  if (cap) {
+                    const url = await uploadSightingMediaCapture(cap);
+                    if (url) {
+                      nextAudioUrl = url;
+                      await idbUpdateMediaUploadedUrl(cap.id, url);
+                    }
+                  }
+                }
 
                 const cleanSi = toFirestoreSightingPayload({
                   ...rawSi,
                   photoUrl: nextPhotoUrl,
                   videoUrl: nextVideoUrl,
+                  audioUrl: nextAudioUrl,
                 });
                 await setDoc(doc(db, 'sightings', cleanSi.id), cleanSi);
                 await idbSaveSighting({ ...cleanSi, synced: true });
@@ -1055,9 +1070,10 @@ export function useCblsStore() {
 
       let localPhotoId: string | undefined;
       let localVideoId: string | undefined;
+      let localAudioId: string | undefined;
       const summaryParts: string[] = [];
 
-      // Persist captured photo/video Blob directly in IndexedDB BEFORE network attempts
+      // Persist captured photo/video/audio Blob directly in IndexedDB BEFORE network attempts
       if (mediaInput?.photoFile) {
         localPhotoId = `img-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
         const photoCap: LocalMediaCapture = {
@@ -1090,6 +1106,24 @@ export function useCblsStore() {
         summaryParts.push(`Video (${formatMb(videoCap.sizeBytes)})`);
       }
 
+      if (mediaInput?.audioBlob) {
+        localAudioId = `aud-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+        const mime = mediaInput.audioMimeType || mediaInput.audioBlob.type || 'audio/webm';
+        const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
+        const audioCap: LocalMediaCapture = {
+          id: localAudioId,
+          sightingId,
+          kind: 'audio',
+          fileName: `canto_campo_${Date.now()}.${ext}`,
+          mimeType: mime,
+          sizeBytes: mediaInput.audioBlob.size,
+          blob: mediaInput.audioBlob,
+          createdAt: nowIso,
+        };
+        await idbSaveMediaCapture(audioCap);
+        summaryParts.push(`Audio (${formatMb(audioCap.sizeBytes)})`);
+      }
+
       void refreshMediaStats();
 
       const basePayload = toFirestoreSightingPayload({
@@ -1098,6 +1132,7 @@ export function useCblsStore() {
         occurrenceId: `urn:catalog:CBLS:${year}:OBS-${Date.now().toString().slice(-4)}`,
         localPhotoId,
         localVideoId,
+        localAudioId,
         localMediaSummary:
           summaryParts.length > 0 ? summaryParts.join(' + ') : undefined,
         synced: true,
@@ -1117,7 +1152,12 @@ export function useCblsStore() {
       setLastSavedIso(nowIso);
       setStorageError(null);
 
-      const logDetails = `${localEntry.individualCount} ind. · ${localEntry.observationMethod || 'En persona'} · ${localEntry.locality}${
+      const vitalTag =
+        localEntry.vitalStatus && localEntry.vitalStatus !== 'Vivo'
+          ? ` · ${localEntry.vitalStatus}`
+          : '';
+      const cantonTag = localEntry.canton ? ` (${localEntry.canton})` : '';
+      const logDetails = `${localEntry.individualCount} ind. · ${localEntry.observationMethod || 'En persona'}${vitalTag} · ${localEntry.locality}${cantonTag}${
         localEntry.localMediaSummary ? ` · ${localEntry.localMediaSummary}` : ''
       }`;
 
@@ -1148,6 +1188,7 @@ export function useCblsStore() {
       try {
         let finalPhotoUrl = basePayload.photoUrl;
         let finalVideoUrl = basePayload.videoUrl;
+        let finalAudioUrl = basePayload.audioUrl;
 
         if (localPhotoId && !finalPhotoUrl) {
           const cap = await idbGetMediaCapture(localPhotoId);
@@ -1169,11 +1210,22 @@ export function useCblsStore() {
             }
           }
         }
+        if (localAudioId && !finalAudioUrl) {
+          const cap = await idbGetMediaCapture(localAudioId);
+          if (cap) {
+            const url = await uploadSightingMediaCapture(cap);
+            if (url) {
+              finalAudioUrl = url;
+              await idbUpdateMediaUploadedUrl(cap.id, url);
+            }
+          }
+        }
 
         const cloudPayload = toFirestoreSightingPayload({
           ...basePayload,
           photoUrl: finalPhotoUrl,
           videoUrl: finalVideoUrl,
+          audioUrl: finalAudioUrl,
         });
 
         await setDoc(doc(db, 'sightings', cloudPayload.id), cloudPayload);
@@ -1252,12 +1304,18 @@ export function useCblsStore() {
       let nextLocalVideoId = mediaInput?.removeExistingVideo
         ? undefined
         : existing.localVideoId;
+      let nextLocalAudioId = mediaInput?.removeExistingAudio
+        ? undefined
+        : existing.localAudioId;
 
       if (mediaInput?.removeExistingPhoto && existing.localPhotoId) {
         await idbDeleteMediaCapture(existing.localPhotoId).catch(() => undefined);
       }
       if (mediaInput?.removeExistingVideo && existing.localVideoId) {
         await idbDeleteMediaCapture(existing.localVideoId).catch(() => undefined);
+      }
+      if (mediaInput?.removeExistingAudio && existing.localAudioId) {
+        await idbDeleteMediaCapture(existing.localAudioId).catch(() => undefined);
       }
 
       if (mediaInput?.photoFile) {
@@ -1296,6 +1354,26 @@ export function useCblsStore() {
         await idbSaveMediaCapture(videoCap);
       }
 
+      if (mediaInput?.audioBlob) {
+        if (existing.localAudioId) {
+          await idbDeleteMediaCapture(existing.localAudioId).catch(() => undefined);
+        }
+        nextLocalAudioId = `aud-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+        const mime = mediaInput.audioMimeType || mediaInput.audioBlob.type || 'audio/webm';
+        const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
+        const audioCap: LocalMediaCapture = {
+          id: nextLocalAudioId,
+          sightingId,
+          kind: 'audio',
+          fileName: `canto_campo_${Date.now()}.${ext}`,
+          mimeType: mime,
+          sizeBytes: mediaInput.audioBlob.size,
+          blob: mediaInput.audioBlob,
+          createdAt: nowIso,
+        };
+        await idbSaveMediaCapture(audioCap);
+      }
+
       const summaryParts: string[] = [];
       if (nextLocalPhotoId) {
         const cap = await idbGetMediaCapture(nextLocalPhotoId).catch(() => undefined);
@@ -1304,6 +1382,10 @@ export function useCblsStore() {
       if (nextLocalVideoId) {
         const cap = await idbGetMediaCapture(nextLocalVideoId).catch(() => undefined);
         summaryParts.push(cap ? `Video (${formatMb(cap.sizeBytes)})` : 'Video local');
+      }
+      if (nextLocalAudioId) {
+        const cap = await idbGetMediaCapture(nextLocalAudioId).catch(() => undefined);
+        summaryParts.push(cap ? `Audio (${formatMb(cap.sizeBytes)})` : 'Audio local');
       }
       void refreshMediaStats();
 
@@ -1314,6 +1396,7 @@ export function useCblsStore() {
         createdAt: existing.createdAt,
         localPhotoId: nextLocalPhotoId,
         localVideoId: nextLocalVideoId,
+        localAudioId: nextLocalAudioId,
         localMediaSummary:
           summaryParts.length > 0 ? summaryParts.join(' + ') : undefined,
         synced: true,
@@ -1359,6 +1442,7 @@ export function useCblsStore() {
       try {
         let finalPhotoUrl = basePayload.photoUrl;
         let finalVideoUrl = basePayload.videoUrl;
+        let finalAudioUrl = basePayload.audioUrl;
 
         if (nextLocalPhotoId && !finalPhotoUrl) {
           const cap = await idbGetMediaCapture(nextLocalPhotoId);
@@ -1380,11 +1464,22 @@ export function useCblsStore() {
             }
           }
         }
+        if (nextLocalAudioId && !finalAudioUrl) {
+          const cap = await idbGetMediaCapture(nextLocalAudioId);
+          if (cap) {
+            const url = await uploadSightingMediaCapture(cap);
+            if (url) {
+              finalAudioUrl = url;
+              await idbUpdateMediaUploadedUrl(cap.id, url);
+            }
+          }
+        }
 
         const cloudPayload = toFirestoreSightingPayload({
           ...basePayload,
           photoUrl: finalPhotoUrl,
           videoUrl: finalVideoUrl,
+          audioUrl: finalAudioUrl,
         });
 
         await setDoc(doc(db, 'sightings', cloudPayload.id), cloudPayload);

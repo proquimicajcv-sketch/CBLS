@@ -110,8 +110,33 @@ export interface SpeciesRecord {
 
 export type SightingObservationMethod =
   | 'En persona'
+  | 'Bioacústica / Canto'
+  | 'Rastro indirecto'
   | 'Cámara trampa'
   | 'Reporte de tercero';
+
+export type SightingVitalStatus =
+  | 'Vivo'
+  | 'Muerto / Atropellado'
+  | 'Herido / Rescate'
+  | 'Rastro sin individuo';
+
+export type SightingCanton =
+  | 'Tarrazú'
+  | 'Dota'
+  | 'León Cortés Castro'
+  | 'Zona de amortiguamiento';
+
+export type SightingIdCertainty =
+  | 'Confirmada en campo'
+  | 'Requiere revisión curatorial'
+  | 'Solo género / familia';
+
+export interface SightingMortalityDetails {
+  cause: string;
+  roadType: string;
+  siteAction: string;
+}
 
 export interface SightingEntry {
   id: string;
@@ -120,6 +145,13 @@ export interface SightingEntry {
   individualCount: number;
   observationMethod?: SightingObservationMethod;
   sourceDetail?: string;
+  vitalStatus?: SightingVitalStatus;
+  mortality?: SightingMortalityDetails;
+  canton?: SightingCanton;
+  gpsAccuracyM?: number;
+  idCertainty?: SightingIdCertainty;
+  demography?: string;
+  behavior?: string;
   observedDate: string;
   observedTime: string;
   observer: string;
@@ -137,6 +169,7 @@ export interface SightingEntry {
   audioUrl?: string; // URL of sighting audio / call
   localPhotoId?: string;
   localVideoId?: string;
+  localAudioId?: string;
   localMediaSummary?: string;
   synced: boolean;
   createdAt: string;
@@ -145,7 +178,7 @@ export interface SightingEntry {
 export interface LocalMediaCapture {
   id: string;
   sightingId: string;
-  kind: 'photo' | 'video';
+  kind: 'photo' | 'video' | 'audio';
   fileName: string;
   mimeType: string;
   sizeBytes: number;

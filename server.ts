@@ -115,11 +115,23 @@ function sanitizeSpeciesRecord(raw: SpeciesRecord, nowIso: string): SpeciesRecor
 }
 
 function sanitizeSightingEntry(raw: SightingEntry): SightingEntry {
-  const validMethods = ['En persona', 'Cámara trampa', 'Reporte de tercero'];
+  const validMethods = [
+    'En persona',
+    'Bioacústica / Canto',
+    'Rastro indirecto',
+    'Cámara trampa',
+    'Reporte de tercero',
+  ];
   const method =
     raw.observationMethod && validMethods.includes(raw.observationMethod)
       ? raw.observationMethod
       : 'En persona';
+
+  const validVital = ['Vivo', 'Muerto / Atropellado', 'Herido / Rescate', 'Rastro sin individuo'];
+  const vitalStatus =
+    raw.vitalStatus && validVital.includes(raw.vitalStatus) ? raw.vitalStatus : undefined;
+  const isMortality =
+    vitalStatus === 'Muerto / Atropellado' || vitalStatus === 'Herido / Rescate';
 
   return {
     id: String(raw.id || `obs-${Date.now()}`),
@@ -133,6 +145,29 @@ function sanitizeSightingEntry(raw: SightingEntry): SightingEntry {
       typeof raw.sourceDetail === 'string' && raw.sourceDetail.trim()
         ? raw.sourceDetail.trim()
         : undefined,
+    vitalStatus,
+    mortality:
+      isMortality && raw.mortality
+        ? {
+            cause: String(raw.mortality.cause || '').trim().slice(0, 160),
+            roadType: String(raw.mortality.roadType || '').trim().slice(0, 160),
+            siteAction: String(raw.mortality.siteAction || '').trim().slice(0, 160),
+          }
+        : undefined,
+    canton: raw.canton,
+    gpsAccuracyM:
+      typeof raw.gpsAccuracyM === 'number' && Number.isFinite(raw.gpsAccuracyM)
+        ? Math.max(1, Math.min(5000, Math.round(raw.gpsAccuracyM)))
+        : undefined,
+    idCertainty: raw.idCertainty,
+    demography:
+      typeof raw.demography === 'string' && raw.demography.trim()
+        ? raw.demography.trim().slice(0, 200)
+        : undefined,
+    behavior:
+      typeof raw.behavior === 'string' && raw.behavior.trim()
+        ? raw.behavior.trim().slice(0, 300)
+        : undefined,
     observedDate: String(raw.observedDate || new Date().toISOString().slice(0, 10)),
     observedTime: String(raw.observedTime || '08:00'),
     observer: String(raw.observer || 'Observador CBLS').trim(),
@@ -142,10 +177,16 @@ function sanitizeSightingEntry(raw: SightingEntry): SightingEntry {
     locality: String(raw.locality || 'Corredor Biológico Los Santos').trim(),
     holdridgeZone: raw.holdridgeZone || 'bmh-MB',
     microhabitat: String(raw.microhabitat || '').trim(),
+    notes: typeof raw.notes === 'string' && raw.notes.trim() ? raw.notes.trim() : undefined,
     weatherCondition: raw.weatherCondition || 'Despejado',
     photoUrl: typeof raw.photoUrl === 'string' ? raw.photoUrl.trim() : undefined,
     videoUrl: typeof raw.videoUrl === 'string' ? raw.videoUrl.trim() : undefined,
     audioUrl: typeof raw.audioUrl === 'string' ? raw.audioUrl.trim() : undefined,
+    localPhotoId: typeof raw.localPhotoId === 'string' ? raw.localPhotoId.trim() : undefined,
+    localVideoId: typeof raw.localVideoId === 'string' ? raw.localVideoId.trim() : undefined,
+    localAudioId: typeof raw.localAudioId === 'string' ? raw.localAudioId.trim() : undefined,
+    localMediaSummary:
+      typeof raw.localMediaSummary === 'string' ? raw.localMediaSummary.trim() : undefined,
     synced: true,
     createdAt: raw.createdAt || new Date().toISOString(),
   };
