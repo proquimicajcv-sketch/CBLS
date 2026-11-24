@@ -151,6 +151,24 @@ export const StepperInput = ({
   );
 };
 
+const FRASES_CBLS = [
+  '“En última instancia, conservamos solo lo que amamos; amaremos solo lo que entendemos.” — Baba Dioum',
+  '“Cuando tiramos de algo en la naturaleza, descubrimos que está conectado a todo lo demás.” — John Muir',
+  '“Cada registro en Tarrazú, Dota y León Cortés es una prueba de que el bosque sigue vivo.” — Brigada CBLS',
+  '“No venimos solo a contar especies; venimos a proteger la vida del Corredor Biológico Los Santos.” — Brigada CBLS',
+  '“Donde hay agua limpia, sombra y bosque en pie, hay futuro para la montaña y su gente.” — CBLS',
+  '“Observar con paciencia y rigor es la primera forma de cuidar lo que amamos.” — Brigada CBLS',
+] as const;
+
+function pickNextQuoteIndex(previousIndex: number): number {
+  if (FRASES_CBLS.length <= 1) return 0;
+  let next: number;
+  do {
+    next = Math.floor(Math.random() * FRASES_CBLS.length);
+  } while (next === previousIndex);
+  return next;
+}
+
 export const ImageLightbox = ({
   open,
   src,
@@ -171,6 +189,7 @@ export const ImageLightbox = ({
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [quoteIndex, setQuoteIndex] = useState<number>(() => pickNextQuoteIndex(-1));
 
   const dragStartRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const movedRef = useRef(false);
@@ -178,6 +197,10 @@ export const ImageLightbox = ({
   const lastTapRef = useRef<number>(0);
 
   const clampZoom = (next: number) => Math.min(4, Math.max(1, Number(next.toFixed(2))));
+
+  const showNextQuote = () => {
+    setQuoteIndex((prev) => pickNextQuoteIndex(prev));
+  };
 
   const resetView = () => {
     setZoom(1);
@@ -195,6 +218,7 @@ export const ImageLightbox = ({
   useEffect(() => {
     if (!open) return;
     resetView();
+    setQuoteIndex((prev) => pickNextQuoteIndex(prev));
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -378,7 +402,7 @@ export const ImageLightbox = ({
 
       {/* Main Zoomable Image Stage */}
       <div
-        className={`relative flex flex-1 items-center justify-center overflow-hidden p-3 sm:p-6 touch-none select-none ${
+        className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-3 sm:p-5 touch-none select-none ${
           zoom > 1 ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-zoom-in'
         }`}
         onWheel={handleWheel}
@@ -409,10 +433,33 @@ export const ImageLightbox = ({
           style={{
             transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${zoom})`,
           }}
-          className={`max-h-[calc(100dvh-156px)] max-w-[96vw] rounded-lg object-contain shadow-2xl sm:max-w-[92vw] ${
+          className={`max-h-full max-w-full rounded-lg object-contain shadow-2xl ${
             isDragging ? '' : 'transition-transform duration-150 ease-out'
           }`}
         />
+      </div>
+
+      {/* CBLS Quote Banner — right above the bottom zoom controls bar */}
+      <div
+        className="shrink-0 px-3 pb-2 sm:px-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          id="cblsQuoteBanner"
+          className="flex items-center justify-between gap-3 rounded-lg border border-emerald-500/20 bg-emerald-950/50 px-4 py-2 text-emerald-100/95"
+        >
+          <p id="cblsQuoteText" className="cbls-quote-bar m-0">
+            {FRASES_CBLS[quoteIndex]}
+          </p>
+          <button
+            type="button"
+            onClick={showNextQuote}
+            title="Cambiar frase"
+            className="shrink-0 rounded bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-200 transition hover:bg-emerald-500/25 focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            Nueva frase
+          </button>
+        </div>
       </div>
 
       {/* Bottom Zoom Controls Bar (Thumb-friendly) */}
