@@ -19,9 +19,9 @@ import {
   type BrigadistaLeaderboardEntry,
   type RangoCBLS,
 } from '../utils/ranks';
-import { Surface } from './ui';
+import { ImageLightbox, Surface } from './ui';
 
-const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'] as const;
+const IMAGE_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg'] as const;
 
 /**
  * Custom botanical / ecological circular emblem SVG for each of the 13 CBLS ranks.
@@ -225,7 +225,7 @@ export const RankBadgeAvatar: React.FC<{
             src={imgSrc}
             alt={`Insignia ${rango.titulo}`}
             onError={() => setExtIdx((prev) => prev + 1)}
-            className="h-full w-full object-cover"
+            className="h-full w-full scale-[1.12] object-cover"
           />
         )}
       </div>
@@ -265,6 +265,7 @@ export const BrigadistaRankCard: React.FC<BrigadistaRankCardProps> = ({
   onResetToSelf,
 }) => {
   const [vitrinaOpen, setVitrinaOpen] = useState<boolean>(defaultOpen);
+  const [previewBadge, setPreviewBadge] = useState<RangoCBLS | null>(null);
   const progress = useMemo(
     () => calcularRangoBrigadista(totalSightings),
     [totalSightings],
@@ -408,14 +409,17 @@ export const BrigadistaRankCard: React.FC<BrigadistaRankCardProps> = ({
                 r.max === Infinity ? `${r.min}+` : `${r.min}–${r.max}`;
 
               return (
-                <div
+                <button
                   key={r.nivel}
-                  className={`relative flex flex-col items-center rounded-xl border p-3 text-center transition ${
+                  type="button"
+                  onClick={() => setPreviewBadge(r)}
+                  title={`Ver insignia ${r.titulo} en detalle`}
+                  className={`group relative flex flex-col items-center rounded-xl border p-3 text-center transition hover:border-emerald-400/70 ${
                     esActual
                       ? 'border-emerald-400 bg-emerald-900/45 shadow-lg shadow-emerald-950/60 ring-1 ring-emerald-400/50'
                       : desbloqueado
                         ? 'border-emerald-700/60 bg-[#0b1f18]'
-                        : 'border-emerald-900/40 bg-[#06120e] opacity-60'
+                        : 'border-emerald-900/40 bg-[#06120e] opacity-65 hover:opacity-90'
                   }`}
                 >
                   {esActual && (
@@ -426,7 +430,7 @@ export const BrigadistaRankCard: React.FC<BrigadistaRankCardProps> = ({
 
                   <RankBadgeAvatar
                     rango={r}
-                    sizeClass="w-16 h-16"
+                    sizeClass="w-20 h-20 transition-transform duration-200 group-hover:scale-105"
                     locked={!desbloqueado}
                     showLevelPill
                   />
@@ -448,11 +452,26 @@ export const BrigadistaRankCard: React.FC<BrigadistaRankCardProps> = ({
                       </>
                     )}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
         </div>
+      )}
+
+      {previewBadge && (
+        <ImageLightbox
+          open={Boolean(previewBadge)}
+          src={`/img/${previewBadge.archivo}.png`}
+          alt={`Insignia ${previewBadge.titulo}`}
+          title={`Nivel ${previewBadge.nivel} · ${previewBadge.titulo}`}
+          subtitle={
+            previewBadge.max === Infinity
+              ? `Meta: ${previewBadge.min}+ avistamientos · ${previewBadge.tierLabel}`
+              : `Meta: ${previewBadge.min}–${previewBadge.max} avistamientos · ${previewBadge.tierLabel}`
+          }
+          onClose={() => setPreviewBadge(null)}
+        />
       )}
     </div>
   );
