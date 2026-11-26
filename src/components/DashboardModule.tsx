@@ -30,6 +30,8 @@ import {
   HOLDRIDGE_ZONES,
   playBioacousticPreview,
 } from '../utils/ecology';
+import { countSightingsForObserver } from '../utils/ranks';
+import { BrigadistaRankCard } from './BrigadistaBadges';
 import { Button, SpecimenImage, Surface } from './ui';
 
 interface DashboardModuleProps {
@@ -530,8 +532,20 @@ export const DashboardModule: React.FC<DashboardModuleProps> = ({
         </div>
       </section>
 
-      {/* Lower Workspace: Recent Sightings / Name-only History + Holdridge Altitudinal Gradient */}
+      {/* Lower Workspace: Active Brigadista Rank + Recent Sightings / History + Holdridge Altitudinal Gradient */}
       <div className="mx-auto max-w-6xl space-y-6 px-4 sm:px-6">
+        <BrigadistaRankCard
+          memberName={currentUser?.observerName || 'Brigadista CBLS'}
+          totalSightings={
+            currentUser
+              ? countSightingsForObserver(sightings, currentUser.observerName)
+              : 0
+          }
+          isCurrentUser
+          showSignInPrompt={!currentUser}
+          onRequestSignIn={onRequestUserSession}
+        />
+
         <Surface className="divide-y divide-border overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 p-5">
             <div>

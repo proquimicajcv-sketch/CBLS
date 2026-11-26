@@ -491,6 +491,7 @@ export default function App() {
             <StatsModule
               species={store.species}
               sightings={store.sightings}
+              currentUser={store.userSession}
             />
           )}
 

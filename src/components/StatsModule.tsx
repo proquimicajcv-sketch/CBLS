@@ -1,18 +1,24 @@
 import React, { useMemo, useState } from 'react';
 import { Check, Copy, FileSpreadsheet, FileText } from 'lucide-react';
-import type { SightingEntry, SpeciesRecord, TaxonGroup } from '../types/cbls';
+import type {
+  SightingEntry,
+  SpeciesRecord,
+  UserSession,
+} from '../types/cbls';
 import {
   generateDarwinCoreCsv,
-  getHoldridgeZoneInfo,
   HOLDRIDGE_ZONES,
   TAXON_COLOR_MAP,
   TAXON_GROUPS,
 } from '../utils/ecology';
+import { buildBrigadistaLeaderboard } from '../utils/ranks';
+import { BrigadistaLeaderboard } from './BrigadistaBadges';
 import { Button, Surface } from './ui';
 
 interface StatsModuleProps {
   species: SpeciesRecord[];
   sightings: SightingEntry[];
+  currentUser?: UserSession | null;
 }
 
 function computeDiversityMetrics(sightings: SightingEntry[]): {
@@ -57,6 +63,7 @@ function computeDiversityMetrics(sightings: SightingEntry[]): {
 export const StatsModule: React.FC<StatsModuleProps> = ({
   species,
   sightings,
+  currentUser,
 }) => {
   const [copiedCsv, setCopiedCsv] = useState<boolean>(false);
 
@@ -143,6 +150,9 @@ export const StatsModule: React.FC<StatsModuleProps> = ({
 
   const handleDownloadAnalyticalReport = () => {
     const totalInd = sightings.reduce((sum, s) => sum + s.individualCount, 0);
+    const rankedBrigadistas = buildBrigadistaLeaderboard(sightings, species, {
+      includeRegisteredTeam: false,
+    });
     const lines = [
       'INFORME CIENTÍFICO Y AUDITORÍA DE BIODIVERSIDAD — BITÁCORA CBLS',
       'Corredor Biológico Los Santos (Tarrazú · Dota · León Cortés, Costa Rica)',
@@ -154,6 +164,14 @@ export const StatsModule: React.FC<StatsModuleProps> = ({
       `Individuos contabilizados (N): ${totalInd} especímenes`,
       `Índice de Shannon-Wiener (H'): ${diversity.shannonH.toFixed(3)} nats`,
       `Equitatividad de Pielou (J'): ${diversity.pielouJ.toFixed(3)}`,
+      '',
+      'RANKING DE BRIGADISTAS CBLS (CONTEOS E INSIGNIAS):',
+      ...(rankedBrigadistas.length > 0
+        ? rankedBrigadistas.map(
+            (b, i) =>
+              `#${i + 1} ${b.name} — ${b.progress.actual.titulo} (N${b.progress.actual.nivel}): ${b.sightingsCount} avistamientos | ${b.individualsCount} individuos | ${b.distinctSpeciesCount} especies`,
+          )
+        : ['- Sin avistamientos registrados aún.']),
       '',
       'DISTRIBUCIÓN POR GRUPO TAXONÓMICO:',
       ...taxonSeries.map(
@@ -239,6 +257,13 @@ export const StatsModule: React.FC<StatsModuleProps> = ({
           </p>
         </div>
       </Surface>
+
+      {/* Real-Time Brigadista Ranking + 13 Badges Showcase */}
+      <BrigadistaLeaderboard
+        species={species}
+        sightings={sightings}
+        currentUser={currentUser}
+      />
 
       {/* Charts */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
